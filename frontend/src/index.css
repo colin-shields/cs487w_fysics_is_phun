@@ -1,0 +1,8 @@
+/* frontend/src/index.css
+   Tailwind base layers + minimal global defaults.
+*/
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
