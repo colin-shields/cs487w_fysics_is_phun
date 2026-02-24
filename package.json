@@ -1,8 +1,5 @@
 {
   "dependencies": {
     "requirements": "^3.0.0"
-  },
-  "rewrites": {
-    "source": "/(.*)", "destination": "/"
   }
 }
