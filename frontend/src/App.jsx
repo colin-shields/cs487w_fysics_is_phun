@@ -45,7 +45,7 @@ export default function App() {
           element={<ComingSoon title="Join (Player/Jury) — Coming Soon" />}
         />
         <Route path="/player/*" element={<ComingSoon title="Player UI — Coming Soon" />} />
-        <Route path="/jury" element={<JuryHome />} />
+        <Route path="/jury" element={<JuryHome title="Jury Home" />} />
 
         {/* Fallback */}
         <Route path="*" element={<ComingSoon title="404 — Page Not Found" />} />

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { setHostCode } from "../../utils/hostAuth";
 import { verifyHostCode } from "../../api/host";
 
@@ -37,6 +37,7 @@ export default function HostLogin() {
 
 
   return (
+    
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900/40 p-6">
         <div className="text-sm text-slate-400">Host View</div>
