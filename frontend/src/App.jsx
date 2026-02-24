@@ -8,6 +8,7 @@ import HostHome from "./pages/host/HostHome.jsx";
 import HostDecks from "./pages/host/HostDecks.jsx";
 import HostSessionSetup from "./pages/host/HostSessionSetup.jsx";
 import HostLogin from "./pages/host/HostLogin.jsx";
+import JuryHome from "./pages/host/Jury/JuryHome.jsx";
 
 import RequireHostAuth from "./components/auth/RequireHostAuth.jsx";
 
@@ -44,7 +45,7 @@ export default function App() {
           element={<ComingSoon title="Join (Player/Jury) — Coming Soon" />}
         />
         <Route path="/player/*" element={<ComingSoon title="Player UI — Coming Soon" />} />
-        <Route path="/jury/*" element={<ComingSoon title="Jury UI — Coming Soon" />} />
+        <Route path="/jury" element={<JuryHome />} />
 
         {/* Fallback */}
         <Route path="*" element={<ComingSoon title="404 — Page Not Found" />} />

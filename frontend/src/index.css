@@ -6,3 +6,57 @@
 :root {
   color-scheme: dark;
 }
+
+@keyframes juryFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes juryGlowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(251, 191, 36, 0.25);
+  }
+}
+
+@keyframes courtroomDrift {
+  0% {
+    transform: scale(1.05) translateY(0) translateX(0);
+  }
+  50% {
+    transform: scale(1.08) translateY(-6px) translateX(-4px);
+  }
+  100% {
+    transform: scale(1.05) translateY(0) translateX(0);
+  }
+}
+
+.jury-fade-up {
+  animation: juryFadeUp 500ms ease-out both;
+}
+
+.jury-seat-filled {
+  animation: juryGlowPulse 1.8s ease-in-out infinite;
+}
+
+.courtroom-drift {
+  animation: courtroomDrift 16s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jury-fade-up,
+  .jury-seat-filled,
+  .courtroom-drift {
+    animation: none !important;
+  }
+}
