@@ -1,8 +1,8 @@
 import pandas as pd
 import os
 
-REQUIRED_COLUMNS = ['Question_ID', 'Question_Text', 'Correct_Answer', 'Predefined_Fake', 'Image_Link']
-
+REQUIRED_COLUMNS = ['Question_ID', 'Question_Text', 'Correct_Answer', 'Predefined_Fake']
+#image_link is optional but if provided must be valid
 def validate_and_parse_csv(file_path: str):
     try:
         # Use keep_default_na=False to prevent empty cells from becoming "NaN" objects
@@ -27,11 +27,11 @@ def validate_and_parse_csv(file_path: str):
                 img_val = None # Keep it clean if empty
 
             parsed_questions.append({
-                "id": str(row['Question_ID']),
-                "text": row['Question_Text'],
-                "answer": row['Correct_Answer'],
-                "fake": row['Predefined_Fake'],
-                "image": img_val
+                "Question_ID": str(row['Question_ID']),
+                "Question_Text": row['Question_Text'],
+                "Correct_Answer": row['Correct_Answer'],
+                "Predefined_Fake": row['Predefined_Fake'],
+                "Image_Link": img_val
             })
 
         return {"status": "success", "data": parsed_questions}

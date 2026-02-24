@@ -1,26 +1,12 @@
-
 import os
-import secrets
-from typing import Dict, Optional
+from typing import Optional
 
-# Single professor host id
-HOST_ID = "default_host"
-
-
+# Single shared host code stored in environment variable
 HOST_CODE = os.getenv("HOST_CODE", "default_code")
 
-_tokens: Dict[str, str] = {}  # token -> host_id
+def validate_host_code(host_code: Optional[str]) -> bool:
+    """Return True if host_code matches the configured HOST_CODE."""
 
-
-def login_with_code(host_code: str) -> Optional[str]:
-    """Return a token if code matches; else None."""
-    if host_code != HOST_CODE:
-        return None
-    token = secrets.token_urlsafe(24)
-    _tokens[token] = HOST_ID
-    return token
-
-
-def validate_token(token: str) -> Optional[str]:
-    """Return host_id if token is valid; else None."""
-    return _tokens.get(token)
+    if not host_code:
+        return False
+    return str(host_code) == str(HOST_CODE)

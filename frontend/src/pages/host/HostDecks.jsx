@@ -11,6 +11,8 @@
 
 import React from "react";
 import DeckUploadCard from "../../components/host/DeckUploadCard";
+import DeckListPanel from "../../components/host/DeckListPanel";
+import DeckCreateCard from "../../components/host/DeckCreateCard";
 import { Link } from "react-router-dom";
 
 
@@ -34,6 +36,18 @@ export default function HostDecks() {
 
         </div>
       </header>
+
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <h1 className="text-2xl font-semibold">All Available Decks</h1>
+
+        <DeckListPanel />
+      </div>
+
+            <div className="mx-auto max-w-5xl px-4 py-8">
+        <h1 className="text-2xl font-semibold">Create a Deck</h1>
+
+        <DeckCreateCard />
+      </div>
 
       <main className="mx-auto max-w-5xl px-4 py-8">
         <DeckUploadCard />

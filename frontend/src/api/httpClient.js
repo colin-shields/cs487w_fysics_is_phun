@@ -10,7 +10,7 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL;
  * Build full URL from a path.
  * @param {string} path e.g. "/" or "/upload-deck"
  */
-function buildUrl(path) {
+export function buildUrl(path) {
   if (!BASE_URL) {
     throw new Error(
       "Missing VITE_API_BASE_URL. Set it in frontend/.env.local and restart Vite."
@@ -23,7 +23,7 @@ function buildUrl(path) {
 /**
  * Parse the response as JSON when possible, otherwise as text.
  */
-async function parseResponse(res) {
+export async function parseResponse(res) {
   const contentType = res.headers.get("content-type") || "";
   const isJson = contentType.includes("application/json");
   return isJson ? await res.json() : await res.text();
@@ -31,11 +31,17 @@ async function parseResponse(res) {
 
 /**
  * GET helper.
+ * @param {string} path
+ * @param {object} extraHeaders optional additional headers (ex: X-Host-Code)
  */
-export async function httpGet(path) {
+export async function httpGet(path, extraHeaders = {}) {
   const url = buildUrl(path);
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        ...extraHeaders,
+      },
+    });
     const data = await parseResponse(res);
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
@@ -47,13 +53,18 @@ export async function httpGet(path) {
  * POST multipart/form-data helper (for CSV uploads).
  * @param {string} path
  * @param {FormData} formData
+ * @param {object} extraHeaders optional additional headers (ex: X-Host-Code)
  */
-export async function httpPostForm(path, formData) {
+export async function httpPostForm(path, formData, extraHeaders = {}) {
   const url = buildUrl(path);
   try {
     const res = await fetch(url, {
       method: "POST",
-      body: formData, // do NOT set Content-Type manually for FormData
+      headers: {
+        ...extraHeaders,
+        // IMPORTANT: do NOT set Content-Type manually for FormData
+      },
+      body: formData,
     });
     const data = await parseResponse(res);
     return { ok: res.ok, status: res.status, data };
@@ -61,3 +72,28 @@ export async function httpPostForm(path, formData) {
     return { ok: false, status: 0, data: null, error: err?.message || String(err) };
   }
 }
+
+/**
+ * POST JSON helper.
+ * @param {string} path
+ * @param {object} body
+ * @param {object} extraHeaders optional additional headers (ex: X-Host-Code)
+ */
+export async function httpPostJson(path, body, extraHeaders = {}) {
+  const url = buildUrl(path);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await parseResponse(res);
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: err?.message || String(err) };
+  }
+}
+
