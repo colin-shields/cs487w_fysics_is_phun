@@ -39,6 +39,14 @@ export default function HostLogin() {
   return (
     
     <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="absolute top-4 left-4">
+                  <Link
+                    className="text-sm text-slate-300 hover:text-white underline underline-offset-4"
+                    to="/jury"
+                  >
+                    Go to Jury Home
+                  </Link>
+        </div>
       <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900/40 p-6">
         <div className="text-sm text-slate-400">Host View</div>
         <h1 className="mt-1 text-xl font-semibold">Host Login</h1>

@@ -44,7 +44,7 @@ export default function ActiveDeckCard() {
             {activeDeck.questions.length} question(s)
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            This deck will be used when creating a session (next step).
+            This deck will be used when creating a session.
           </p>
         </div>
 
@@ -54,15 +54,6 @@ export default function ActiveDeckCard() {
         >
           Clear
         </button>
-      </div>
-
-      <div className="mt-4">
-        <a
-          href="/host/decks"
-          className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
-        >
-          Manage Decks
-        </a>
       </div>
     </section>
   );

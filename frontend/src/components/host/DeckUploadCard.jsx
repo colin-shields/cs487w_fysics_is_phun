@@ -18,8 +18,7 @@
  */
 
 import React, { useMemo, useState } from "react";
-import {
-  uploadDeckCsv} from "../../api/decks";
+import { uploadDeckCsv } from "../../api/decks";
 import { downloadTextFile } from "../../utils/download";
 import { useDeck } from "../../state/DeckContext.jsx";
 
@@ -43,7 +42,6 @@ function buildCsvTemplate() {
   ];
   return [header, ...rows].join("\n");
 }
-
 
 function parseUploadResponse(uploadRes) {
   const payload = uploadRes?.data;
@@ -173,8 +171,6 @@ export default function DeckUploadCard() {
     setUploadedDeckPreview(parsed.questions);
     setUploadedDeckName(file.name);
 
-
-
     setBusy(false);
   }
 
@@ -199,34 +195,10 @@ export default function DeckUploadCard() {
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
       <h2 className="text-lg font-semibold">Deck Manager: Upload CSV</h2>
       <p className="mt-2 text-sm text-slate-300">
-        Upload a deck CSV to the backend (<span className="font-mono">POST /upload-deck</span>).
-        After upload, click <span className="font-semibold">Set as Active Deck</span>.
+        Upload a deck CSV to the backend (
+        <span className="font-mono">POST /upload-deck</span>). After upload,
+        click <span className="font-semibold">Set as Active Deck</span>.
       </p>
-
-      {/* Schema + template */}
-      <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-        <div className="text-sm font-semibold">Required CSV Columns</div>
-        <ul className="mt-2 grid gap-1 text-sm text-slate-200 sm:grid-cols-2">
-          {REQUIRED_COLUMNS.map((c) => (
-            <li key={c} className="font-mono">
-              {c}
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs text-slate-400">
-            Tip: avoid commas inside fields unless you wrap them in quotes.
-          </div>
-
-          <button
-            onClick={downloadTemplate}
-            className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
-          >
-            Download CSV Template
-          </button>
-        </div>
-      </div>
 
       {/* Upload controls */}
       <div className="mt-4 grid gap-3">
@@ -251,7 +223,8 @@ export default function DeckUploadCard() {
         <div className="rounded-lg border border-slate-800 bg-slate-950/30 p-3">
           <div className="text-sm font-semibold">Optional Images (future)</div>
           <p className="mt-1 text-xs text-slate-400">
-            Backend supports image upload. MVP is text-only, so this can be ignored for now.
+            Backend supports image upload. MVP is text-only, so this can be
+            ignored for now.
           </p>
           <input
             type="file"
@@ -265,6 +238,33 @@ export default function DeckUploadCard() {
               Selected {imageFiles.length} image(s).
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Schema + template */}
+
+      <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+        <div className="text-sm font-semibold">Required CSV Columns</div>
+        <ul className="mt-2 grid gap-1 text-sm text-slate-200 sm:grid-cols-2">
+          {REQUIRED_COLUMNS.map((c) => (
+            <li key={c} className="font-mono italic">
+              {c}
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-slate-400">
+            Tip: Avoid commas inside fields (such as question or answer texts).
+            If you must include commas, remember to wrap the text in "quotes".
+          </div>
+
+          <button
+            onClick={downloadTemplate}
+            className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
+          >
+            Download CSV Template
+          </button>
         </div>
       </div>
 
@@ -292,13 +292,13 @@ export default function DeckUploadCard() {
                   <div className="mt-1 text-sm text-emerald-100">
                     Parsed {uploadedDeckPreview?.length || 0} question(s).
                   </div>
-
-  
                 </div>
 
                 <button
                   onClick={setAsActiveDeck}
-                  disabled={!uploadedDeckPreview || uploadedDeckPreview.length === 0}
+                  disabled={
+                    !uploadedDeckPreview || uploadedDeckPreview.length === 0
+                  }
                   className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
                 >
                   Set as Active Deck
@@ -308,40 +308,41 @@ export default function DeckUploadCard() {
           )}
 
           {/* Preview table (first 10 rows) */}
-          {Array.isArray(uploadedDeckPreview) && uploadedDeckPreview.length > 0 && (
-            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-              <div className="text-sm font-semibold">
-                Uploaded Deck Preview: {uploadedDeckName}
-              </div>
-              <div className="mt-2 overflow-auto">
-                <table className="min-w-full text-left text-xs">
-                  <thead className="text-slate-300">
-                    <tr>
-                      {Object.keys(uploadedDeckPreview[0]).map((k) => (
-                        <th
-                          key={k}
-                          className="border-b border-slate-800 px-3 py-2 font-semibold"
-                        >
-                          {k}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="text-slate-200">
-                    {uploadedDeckPreview.slice(0, 10).map((row, idx) => (
-                      <tr key={idx} className="border-b border-slate-900/60">
+          {Array.isArray(uploadedDeckPreview) &&
+            uploadedDeckPreview.length > 0 && (
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div className="text-sm font-semibold">
+                  Uploaded Deck Preview: {uploadedDeckName}
+                </div>
+                <div className="mt-2 overflow-auto">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="text-slate-300">
+                      <tr>
                         {Object.keys(uploadedDeckPreview[0]).map((k) => (
-                          <td key={k} className="px-3 py-2 align-top">
-                            {String(row[k] ?? "")}
-                          </td>
+                          <th
+                            key={k}
+                            className="border-b border-slate-800 px-3 py-2 font-semibold"
+                          >
+                            {k}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="text-slate-200">
+                      {uploadedDeckPreview.slice(0, 10).map((row, idx) => (
+                        <tr key={idx} className="border-b border-slate-900/60">
+                          {Object.keys(uploadedDeckPreview[0]).map((k) => (
+                            <td key={k} className="px-3 py-2 align-top">
+                              {String(row[k] ?? "")}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Raw response (debug) */}
           <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3">

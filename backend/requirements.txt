@@ -1,5 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
+websockets
 pandas
 python-multipart
 python-dotenv
+

@@ -1,7 +1,7 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Header, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Header, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from deck_manager import validate_and_parse_csv
@@ -118,6 +118,9 @@ async def upload_deck(
 # Temporary storage for active games
 active_sessions = {}
 
+# Websocket connections per room code (uppercase)
+session_sockets: Dict[str, List[WebSocket]] = {}
+
 class SessionRequest(BaseModel):
     deck_id: str
 
@@ -131,7 +134,12 @@ async def create_session(request: SessionRequest):
     active_sessions[room_code] = {
         "deck_id": deck_id,
         "players": [],
-        "status": "lobby"
+        "status": "lobby",
+        "current_index": None,  # will hold index of question in progress
+        # per-question collections for gameplay
+        "submissions": {},       # questionIndex -> [ {player, text}, ... ]
+        "choices": {},           # questionIndex -> { player: answer }
+        "scores": {},            # player -> score
     }
     
     return {"room_code": room_code}
@@ -171,11 +179,169 @@ async def get_session_status(room_code: str):
     if code not in active_sessions:
         raise HTTPException(status_code=404, detail="Room not found")
     
-    return {
+    sess = active_sessions[code]
+    ret = {
         "room_code": code,
-        "status": active_sessions[code]["status"],
-        "players": active_sessions[code]["players"]
+        "status": sess["status"],
+        "players": sess["players"]
     }
+    if sess.get("current_index") is not None:
+        ret["current_index"] = sess["current_index"]
+    return ret
+
+@app.delete("/session/{room_code}")
+async def cancel_session(room_code: str, _ok: bool = Depends(require_host)):
+    """
+    Cancels/terminates a session. Sets status to 'cancelled' so players are notified.
+    Host can call this when exiting the lobby to end the game.
+    """
+    code = room_code.upper()
+    if code not in active_sessions:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    active_sessions[code]["status"] = "cancelled"
+    # also notify connected websockets
+    if code in session_sockets:
+        for ws in session_sockets[code][:]:
+            try:
+                await ws.send_json({"type": "cancelled"})
+            except Exception:
+                pass
+    
+    return {"message": f"Session {code} has been cancelled"}
+
+
+
+@app.websocket("/ws/session/{room_code}")
+async def session_ws(websocket: WebSocket, room_code: str):
+    # debug info for every handshake attempt
+    print(f"WebSocket connect attempt room={room_code}, origin={websocket.headers.get('origin')}")
+    # Upgrade connection
+    await websocket.accept()
+    print(f"WebSocket accepted for room={room_code}")
+
+    code = room_code.upper()
+    # reject if session doesn't exist
+    if code not in active_sessions:
+        print(f"WebSocket rejected: room {code} not found")
+        await websocket.close(code=1008)
+        return
+
+    # register
+    session_sockets.setdefault(code, []).append(websocket)
+    print(f"Registered socket for {code}; total connections={len(session_sockets[code])}")
+
+    # send current question immediately if one exists
+    sess = active_sessions.get(code)
+    if sess:
+        idx = sess.get("current_index")
+        if idx is not None:
+            payload = {"type": "question", "index": idx}
+            if "current_question" in sess:
+                payload["question"] = sess["current_question"]
+            await websocket.send_json(payload)
+            print(f"Sent initial question payload to new client for room={code}")
+
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            print(f"Received ws msg for room={code}: {msg}")
+            # expected format: {type:'question', index:..., question: {...}}
+            if msg.get("type") == "question":
+                # update session data
+                active_sessions[code]["status"] = "in-progress"
+                active_sessions[code]["current_index"] = msg.get("index")
+                active_sessions[code]["current_question"] = msg.get("question")
+                # broadcast to all peers except sender
+                for ws in session_sockets.get(code, [])[:]:
+                    if ws is websocket:
+                        continue
+                    try:
+                        await ws.send_json(msg)
+                    except WebSocketDisconnect:
+                        session_sockets[code].remove(ws)
+                    except Exception:
+                        pass
+            elif msg.get("type") == "cancelled":
+                for ws in session_sockets.get(code, [])[:]:
+                    if ws is websocket:
+                        continue
+                    try:
+                        await ws.send_json({"type":"cancelled"})
+                    except Exception:
+                        pass
+            elif msg.get("type") == "fake":
+                # a player submitted a fake answer
+                player = msg.get("player")
+                text = msg.get("text")
+                idx = active_sessions[code].get("current_index")
+                subs = active_sessions[code].setdefault("submissions", {})
+                subs.setdefault(idx, []).append({"player": player, "text": text})
+                # broadcast to host (and others) that a submission arrived
+                for ws in session_sockets.get(code, [])[:]:
+                    try:
+                        await ws.send_json({"type": "submission", "player": player})
+                    except Exception:
+                        pass
+            elif msg.get("type") == "answers":
+                # host is requesting answer reveal; msg.answers contains the base list (correct + predefined)
+                idx = active_sessions[code].get("current_index")
+                # gather player-submitted fakes for this question
+                subs = active_sessions[code].get("submissions", {}).get(idx, [])
+                const_list = list(msg.get("answers") or [])
+                for entry in subs:
+                    # entry has {player, text}
+                    const_list.append(entry.get("text"))
+                # optional: randomize order to hide which is correct
+                import random
+                random.shuffle(const_list)
+                # broadcast final list
+                for ws in session_sockets.get(code, [])[:]:
+                    try:
+                        await ws.send_json({"type": "answers", "answers": const_list})
+                    except Exception:
+                        pass
+            elif msg.get("type") == "choice":
+                # player chose an answer during answer phase
+                player = msg.get("player")
+                choice = msg.get("answer")
+                idx = active_sessions[code].get("current_index")
+                choices = active_sessions[code].setdefault("choices", {})
+                choices.setdefault(idx, {})[player] = choice
+                # after recording choice, optionally check if all players have chosen
+            elif msg.get("type") == "results_request":
+                # host wants to see results for current question
+                idx = active_sessions[code].get("current_index")
+                correct = None
+                # attempt to read correct from stored question object if saved
+                # but simpler: host will resend correct as part of message
+                # server can compute stats based on stored choices
+                stats = {}
+                choices = active_sessions[code].get("choices", {}).get(idx, {})
+                for _, ans in choices.items():
+                    stats[ans] = stats.get(ans, 0) + 1
+                # broadcast results
+                for ws in session_sockets.get(code, [])[:]:
+                    try:
+                        await ws.send_json({"type": "results", "stats": stats})
+                    except Exception:
+                        pass
+            elif msg.get("type") == "game_finished":
+                # host is ending the game; broadcast to all players
+                active_sessions[code]["status"] = "finished"
+                for ws in session_sockets.get(code, [])[:]:
+                    try:
+                        await ws.send_json({"type": "game_finished"})
+                    except Exception:
+                        pass
+            # ignore other message types for now
+    except WebSocketDisconnect:
+        print(f"WebSocketDisconnect for room={code}")
+        session_sockets[code].remove(websocket)
+        # cleanup empty list
+        if not session_sockets[code]:
+            del session_sockets[code]
+        print(f"Socket removed for {code}; remaining={len(session_sockets.get(code, []))}")
 
 @app.get("/decks")
 async def list_decks(_ok: bool = Depends(require_host)):

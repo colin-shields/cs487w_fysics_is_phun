@@ -31,12 +31,12 @@ export default function HostHome() {
           </div>
 
           {/* Use Link to avoid full page reload */}
-          <Link
+          <button
+            onClick={() => window.open("/join", "_blank")}
             className="text-sm text-slate-300 hover:text-white underline underline-offset-4"
-            to="/join"
           >
-            Go to Join Page (later)
-          </Link>
+            Test Join Page ↗
+          </button>
         </div>
       </header>
 
@@ -49,11 +49,13 @@ export default function HostHome() {
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           {/* Card 1 */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-            <h2 className="text-lg font-semibold">Create Session</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Configure timers and options, then create a session (join code + host URL).
-            </p>
+          <section className="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+            <div className="flex-grow">
+              <h2 className="text-lg font-semibold">Create Session</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Configure timers and options, then create a session (join code + host URL).
+              </p>
+            </div>
 
             <button
               onClick={navigateToSessionSetup}
@@ -64,11 +66,13 @@ export default function HostHome() {
           </section>
 
           {/* Card 2 */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-            <h2 className="text-lg font-semibold">Decks (CSV)</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Upload a CSV deck, preview it, then set it as the Active Deck.
-            </p>
+          <section className="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+            <div className="flex-grow">
+              <h2 className="text-lg font-semibold">Decks (CSV)</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Upload a CSV deck, preview it, then set it as the Active Deck.
+              </p>
+            </div>
 
             <button
               onClick={navigateToDeckManager}
@@ -77,6 +81,10 @@ export default function HostHome() {
               Open Deck Manager
             </button>
           </section>
+        </div>
+
+        <div className="mt-6">
+          <ActiveDeckCard />
         </div>
 
         <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
@@ -89,9 +97,6 @@ export default function HostHome() {
           </ol>
         </div>
 
-        <div className="mt-6">
-          <ActiveDeckCard />
-        </div>
       </main>
     </div>
   );

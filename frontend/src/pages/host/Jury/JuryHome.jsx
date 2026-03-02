@@ -5,16 +5,18 @@ import Courtroom from "../../../assets/courtroom.png";
 import JuryVote from "./JuryVote.jsx";
 import JuryResults from "./JuryResults.jsx";
 
-const MAX_JURORS = 3;
+const DEFAULT_JURORS = 1;
+const MIN_JURORS = 1;
+const MAX_JURORS = 25;
 const POLL_MS = 2000;
 
-function normalizeNames(payload) {
+function normalizeNames(payload, limit) {
   if (!payload || !Array.isArray(payload.players)) return [];
 
   return payload.players
     .map((name) => String(name || "").trim())
     .filter(Boolean)
-    .slice(0, MAX_JURORS);
+    .slice(0, limit);
 }
 
 function JurorChair({ seatNumber, name }) {
@@ -56,8 +58,27 @@ export default function JuryHome() {
 
   const [roomCodeInput, setRoomCodeInput] = useState(initialRoomCode);
   const [activeRoomCode, setActiveRoomCode] = useState(initialRoomCode);
+  const [jurorSeatCount, setJurorSeatCount] = useState(DEFAULT_JURORS);
   const [jurors, setJurors] = useState([]);
   const [statusText, setStatusText] = useState("Enter a room code to watch jury seats.");
+
+  const seatCountKey = useMemo(
+    () => `jury_seat_count_${String(activeRoomCode || "GLOBAL").toUpperCase()}`,
+    [activeRoomCode]
+  );
+
+  useEffect(() => {
+    const saved = Number.parseInt(window.localStorage.getItem(seatCountKey) || "", 10);
+    if (Number.isNaN(saved)) {
+      setJurorSeatCount(DEFAULT_JURORS);
+      return;
+    }
+    setJurorSeatCount(Math.max(MIN_JURORS, Math.min(MAX_JURORS, saved)));
+  }, [seatCountKey]);
+
+  useEffect(() => {
+    window.localStorage.setItem(seatCountKey, String(jurorSeatCount));
+  }, [jurorSeatCount, seatCountKey]);
 
   useEffect(() => {
     if (!activeRoomCode) return;
@@ -75,12 +96,12 @@ export default function JuryHome() {
         return;
       }
 
-      const nextJurors = normalizeNames(response.data);
+      const nextJurors = normalizeNames(response.data, jurorSeatCount);
       setJurors(nextJurors);
       setStatusText(
-        nextJurors.length >= MAX_JURORS
+        nextJurors.length >= jurorSeatCount
           ? "All jury seats are now filled."
-          : `Waiting for ${MAX_JURORS - nextJurors.length} more juror(s).`
+          : `Waiting for ${jurorSeatCount - nextJurors.length} more juror(s).`
       );
     }
 
@@ -91,13 +112,13 @@ export default function JuryHome() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeRoomCode]);
+  }, [activeRoomCode, jurorSeatCount]);
 
   const seatNames = useMemo(() => {
     const seats = [...jurors];
-    while (seats.length < MAX_JURORS) seats.push("");
+    while (seats.length < jurorSeatCount) seats.push("");
     return seats;
-  }, [jurors]);
+  }, [jurors, jurorSeatCount]);
 
   const seedAnswers = useMemo(
     () =>
@@ -221,9 +242,39 @@ export default function JuryHome() {
           <div className="mt-3 text-xs text-slate-300">
             Active room: <span className="font-semibold text-amber-200">{activeRoomCode || "(none)"}</span>
           </div>
+
+          <div className="mt-4 flex items-center gap-3">
+            <div className="text-sm text-slate-200">Number of Jurors</div>
+            <div className="inline-flex items-center rounded-lg border border-slate-600 bg-slate-950/65">
+              <div className="w-12 px-2 py-2 text-center text-lg font-semibold text-amber-200">
+                {jurorSeatCount}
+              </div>
+              <div className="flex flex-col border-l border-slate-600">
+                <button
+                  type="button"
+                  onClick={() => setJurorSeatCount((value) => Math.min(MAX_JURORS, value + 1))}
+                  className="px-3 py-1 text-xs text-slate-200 transition hover:bg-slate-800/80 hover:text-white"
+                  aria-label="Increase jurors"
+                  title="Increase jurors"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setJurorSeatCount((value) => Math.max(MIN_JURORS, value - 1))}
+                  className="border-t border-slate-600 px-3 py-1 text-xs text-slate-200 transition hover:bg-slate-800/80 hover:text-white"
+                  aria-label="Decrease jurors"
+                  title="Decrease jurors"
+                >
+                  ▼
+                </button>
+              </div>
+            </div>
+            <div className="text-xs text-slate-300">Minimum: {MIN_JURORS}</div>
+          </div>
         </section>
 
-        <section className="mt-8 grid gap-4 md:grid-cols-3">
+        <section className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {seatNames.map((name, index) => (
             <JurorChair key={index} seatNumber={index + 1} name={name} />
           ))}

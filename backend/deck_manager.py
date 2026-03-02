@@ -21,7 +21,13 @@ def validate_and_parse_csv(file_path: str):
             
             # Only process if there's actually text there
             if img_val and img_val != "" and img_val.lower() != "nan":
-                if not img_val.lower().startswith("http"):
+                # normalize: if already a full URL or starts with /assets/, leave it
+                if img_val.lower().startswith("http"):
+                    pass
+                elif img_val.startswith("/assets/"):
+                    # already has prefix, do nothing
+                    pass
+                else:
                     img_val = f"/assets/{img_val}"
             else:
                 img_val = None # Keep it clean if empty

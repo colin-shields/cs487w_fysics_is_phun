@@ -10,9 +10,11 @@
  * We are NOT generating join codes client-side.
  */
 
-import React, { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useDeck } from "../../state/DeckContext.jsx";
+import { httpPostJson, buildUrl } from "../../api/httpClient";
+import { getHostCode } from "../../utils/hostAuth";
 
 const DEFAULTS = {
   stage1Seconds: 60,
@@ -27,11 +29,50 @@ function clampInt(value, min, max, fallback) {
 }
 
 export default function HostSessionSetup() {
+  const navigate = useNavigate();
   const { activeDeck } = useDeck();
 
   const [stage1Seconds, setStage1Seconds] = useState(DEFAULTS.stage1Seconds);
   const [stage2Seconds, setStage2Seconds] = useState(DEFAULTS.stage2Seconds);
   const [enableWorstFake, setEnableWorstFake] = useState(DEFAULTS.enableWorstFake);
+
+  // Session state
+  const [busyCreating, setBusyCreating] = useState(false);
+  const [creationError, setCreationError] = useState("");
+
+  // (roomCode and player state now handled by the dedicated lobby page)
+
+
+  async function onCreateSession() {
+    setBusyCreating(true);
+    setCreationError("");
+
+    const hostCode = getHostCode?.() || "";
+    const headers = hostCode ? { "X-Host-Code": hostCode } : {};
+
+    try {
+      const res = await httpPostJson(
+        "/create-session",
+        { deck_id: activeDeck.deckId || activeDeck.name },
+        headers
+      );
+
+      if (!res.ok) {
+        setCreationError(`Failed to create session (HTTP ${res.status}).`);
+        setBusyCreating(false);
+        return;
+      }
+
+      // navigate to new lobby page, passing room code
+      navigate("/host/lobby", { state: { roomCode: res.data.room_code } });
+      setBusyCreating(false);
+    } catch (err) {
+      setCreationError(err.message || "Unknown error");
+      setBusyCreating(false);
+    }
+  }
+
+  // helpers removed - lobby page handles start/back actions
 
   // Basic deck summary derived from the active deck
   const deckSummary = useMemo(() => {
@@ -100,7 +141,7 @@ export default function HostSessionSetup() {
                   <span className="font-semibold text-slate-100">Questions:</span> {deckSummary.count}
                 </div>
                 <div className="mt-2 text-xs text-slate-400">
-                  First question preview: {deckSummary.firstQuestion}
+                  Preview: {deckSummary.firstQuestion}
                 </div>
               </div>
             </section>
@@ -115,6 +156,7 @@ export default function HostSessionSetup() {
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <label className="block">
                   <div className="text-sm font-semibold">Stage 1 timer (seconds)</div>
+                  <div className="mt-1 text-xs text-slate-400">In this stage, the question is presented and players can submit their answers.</div>
                   <input
                     type="number"
                     min={10}
@@ -125,11 +167,12 @@ export default function HostSessionSetup() {
                     }
                     className="mt-2 w-full rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100"
                   />
-                  <div className="mt-1 text-xs text-slate-400">Default: 60s</div>
+              
                 </label>
 
                 <label className="block">
                   <div className="text-sm font-semibold">Stage 2 timer (seconds)</div>
+                  <div className="mt-1 text-xs text-slate-400">Players must choose which answer they believe is correct.</div>
                   <input
                     type="number"
                     min={10}
@@ -140,7 +183,6 @@ export default function HostSessionSetup() {
                     }
                     className="mt-2 w-full rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100"
                   />
-                  <div className="mt-1 text-xs text-slate-400">Default: 45s</div>
                 </label>
               </div>
 
@@ -153,34 +195,28 @@ export default function HostSessionSetup() {
                 />
                 <div>
                   <div className="text-sm font-semibold">Enable “Worst Fake” (-1)</div>
-                  <div className="text-xs text-slate-400">Default OFF for MVP safety.</div>
+                  <div className="text-xs text-slate-400">Jury will be allowed to choose a "worst fake" submission to award -1 points.</div>
                 </div>
               </label>
 
-              {/* Create Session (disabled until backend session endpoints exist) */}
+              {/* Create Session */}
               <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-slate-400">
-                  Next: this button will call the backend to create a live session (join code + host URL).
+                  Create a live session and share the code with players.
                 </div>
 
                 <button
-                  disabled={!canCreateSession}
+                  disabled={!canCreateSession || busyCreating}
                   className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
-                  onClick={() => {
-                    // Placeholder only: no backend endpoint exists yet.
-                    // We will implement the real call after you confirm the endpoint contract.
-                    alert(
-                      "Session creation endpoint not wired yet. Confirm backend route + response format and we’ll connect it."
-                    );
-                  }}
+                  onClick={onCreateSession}
                 >
-                  Create Session (coming next)
+                  {busyCreating ? "Creating..." : "Create Session"}
                 </button>
               </div>
 
               {/* Display the settings that would be sent (transparent + useful for debugging) */}
               <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                <div className="text-xs text-slate-300 font-semibold mb-1">Payload Preview (future)</div>
+                <div className="text-xs text-slate-300 font-semibold mb-1">Session Config</div>
                 <pre className="whitespace-pre-wrap break-words text-xs text-slate-200">
 {JSON.stringify(
   {
@@ -197,8 +233,15 @@ export default function HostSessionSetup() {
 )}
                 </pre>
               </div>
+
+              {creationError && (
+                <div className="mt-4 rounded-lg border border-rose-900/60 bg-rose-950/40 p-3 text-sm text-rose-100">
+                  {creationError}
+                </div>
+              )}
             </section>
-          </>
+
+            {/* session lobby is now a separate page; user will be redirected there */}          </>
         )}
       </main>
     </div>
