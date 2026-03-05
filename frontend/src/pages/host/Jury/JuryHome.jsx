@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { httpGet } from "../../../api/httpClient";
+import { httpPostJson } from "../../../api/httpClient";
 import Courtroom from "../../../assets/courtroom.png";
 import JuryVote from "./JuryVote.jsx";
 import JuryResults from "./JuryResults.jsx";
@@ -11,9 +11,9 @@ const MAX_JURORS = 25;
 const POLL_MS = 2000;
 
 function normalizeNames(payload, limit) {
-  if (!payload || !Array.isArray(payload.players)) return [];
+  if (!payload || !Array.isArray(payload.current_jurors)) return [];
 
-  return payload.players
+  return payload.current_jurors.slice(0, limit) // ensure we don't exceed seat count
     .map((name) => String(name || "").trim())
     .filter(Boolean)
     .slice(0, limit);
@@ -86,17 +86,29 @@ export default function JuryHome() {
     let cancelled = false;
 
     async function loadStatus() {
-      const response = await httpGet(`/session-status/${encodeURIComponent(activeRoomCode)}`);
-
+      const response = await httpPostJson("/join-session", {
+        player_type: "juror",
+        room_code: activeRoomCode.trim().toUpperCase(),
+        player_name: "", // No player name for juror seats
+      });
       if (cancelled) return;
 
-      if (!response.ok) {
-        setJurors([]);
-        setStatusText("Room not found or unavailable.");
-        return;
-      }
+        if (!response.ok) {
+            setJurors([]);
+              if (response.status === 404) {
+                setStatusText("Room not found. Check the code and try again.");
+              } else if (response.status === 400) {
+                setStatusText("Game has already started or room is full.");
+              } else {
+                setStatusText(`Failed to join (HTTP ${response.status}).`);
+              }
+              setBusy(false);
+              return;
+        }
+      
 
       const nextJurors = normalizeNames(response.data, jurorSeatCount);
+      console.log("Loaded jurors:", response.data, "->", nextJurors);
       setJurors(nextJurors);
       setStatusText(
         nextJurors.length >= jurorSeatCount

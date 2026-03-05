@@ -134,6 +134,7 @@ async def create_session(request: SessionRequest):
     active_sessions[room_code] = {
         "deck_id": deck_id,
         "players": [],
+        "jurors": [],
         "status": "lobby",
         "current_index": None,  # will hold index of question in progress
         # per-question collections for gameplay
@@ -146,6 +147,7 @@ async def create_session(request: SessionRequest):
 
 # A simple model to handle the incoming player data
 class JoinRequest(BaseModel):
+    player_type: Optional[str] = None  # "player" or "juror"
     room_code: str
     player_name: str
 
@@ -165,11 +167,16 @@ async def join_session(request: JoinRequest):
         raise HTTPException(status_code=400, detail="Game already in progress")
     
     # 3. Add the player to the list
-    active_sessions[code]["players"].append(request.player_name)
+    if request.player_type == "player" or not request.player_type:
+        active_sessions[code]["players"].append(request.player_name)
     
+    elif request.player_type == "juror":
+        active_sessions[code]["jurors"].append(request.player_name)
+
     return {
         "message": f"Welcome {request.player_name}!",
-        "current_players": active_sessions[code]["players"]
+        "current_players": active_sessions[code]["players"],
+        "current_jurors": active_sessions[code]["jurors"]
     }
 
 @app.get("/session-status/{room_code}")
@@ -404,6 +411,24 @@ async def delete_deck(filename: str, _ok: bool = Depends(require_host)):
         return {"message": f"Deleted {filename}"}
     else:
         raise HTTPException(status_code=404, detail="File not found")
+
+@app.get("/decks/{filename}/download")
+async def download_deck_csv(filename: str, _ok: bool = Depends(require_host)):
+    """
+    Triggers a browser download of the specific CSV file.
+    """
+    file_path = f"decks/{filename}"
+    
+    # Check if the file actually exists on the server
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Deck file not found")
+    
+    # return the file as a downloadable response
+    return FileResponse(
+        path=file_path, 
+        filename=filename, 
+        media_type='text/csv'
+    )
 
 @app.post("/upload-asset")
 async def upload_asset(file: UploadFile = File(...), _ok: bool = Depends(require_host)):

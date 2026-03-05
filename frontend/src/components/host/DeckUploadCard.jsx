@@ -18,7 +18,7 @@
  */
 
 import React, { useMemo, useState } from "react";
-import { uploadDeckCsv } from "../../api/decks";
+import { uploadDeckApi } from "../../api/decks";
 import { downloadTextFile } from "../../utils/download";
 import { useDeck } from "../../state/DeckContext.jsx";
 
@@ -112,6 +112,9 @@ export default function DeckUploadCard() {
 
   const [busy, setBusy] = useState(false);
 
+  const [customName, setCustomName] = useState("");
+  const [wasActivated, setWasActivated] = useState(false);
+
   // Stores what we show in the debug panel
   const [result, setResult] = useState(null); //result is the raw upload response (or combined upload+create response)
 
@@ -152,9 +155,14 @@ export default function DeckUploadCard() {
     setUploadedDeckPreview(null);
     setUploadedDeckName(null);
     setPersistNote(null);
+    setWasActivated(false); // Reset feedback for the new upload
 
-    // 1) Upload CSV (and optional images)
-    const uploadRes = await uploadDeckCsv(file, imageFiles);
+    // Calculate name: User input OR filename minus .csv
+    const finalName = customName.trim() || file.name.replace(/\.csv$/i, "");
+
+    // Call the updated API function with 3 arguments
+    const uploadRes = await uploadDeckApi(file, imageFiles, finalName);
+
     console.log("Upload response:", uploadRes);
     setResult(uploadRes);
 
@@ -167,9 +175,9 @@ export default function DeckUploadCard() {
       return;
     }
 
-    // Success: show preview + enable "Set Active Deck"
+    // Success: show preview + use the finalName we decided on
     setUploadedDeckPreview(parsed.questions);
-    setUploadedDeckName(file.name);
+    setUploadedDeckName(finalName);
 
     setBusy(false);
   }
@@ -181,7 +189,9 @@ export default function DeckUploadCard() {
       name: uploadedDeckName,
       questions: uploadedDeckPreview,
       uploadedAt: Date.now(),
+      deckId: uploadedDeckName,
     });
+    setWasActivated(true);
   }
 
   // Derived UI status for the upload response
@@ -203,6 +213,22 @@ export default function DeckUploadCard() {
       {/* Upload controls */}
       <div className="mt-4 grid gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="mb-4 w-full">
+            <label className="block text-xs font-medium text-slate-400 mb-1">
+              Custom Deck Name
+            </label>
+            <input
+              type="text"
+              placeholder="Enter a unique name"
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              className="w-full min-w-[300px] md:min-w-[450px] rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-500"
+            />
+            <p className="mt-1 text-[10px] text-slate-500">
+              Leave blank to use the original filename.
+            </p>
+          </div>
+
           <input
             type="file"
             accept=".csv,text/csv"
@@ -297,11 +323,17 @@ export default function DeckUploadCard() {
                 <button
                   onClick={setAsActiveDeck}
                   disabled={
-                    !uploadedDeckPreview || uploadedDeckPreview.length === 0
+                    !uploadedDeckPreview ||
+                    uploadedDeckPreview.length === 0 ||
+                    wasActivated
                   }
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                    wasActivated
+                      ? "bg-slate-700 text-slate-400 cursor-default"
+                      : "bg-emerald-600 text-white hover:bg-emerald-500"
+                  }`}
                 >
-                  Set as Active Deck
+                  {wasActivated ? "Active Deck Set" : "Set as Active Deck"}
                 </button>
               </div>
             </div>

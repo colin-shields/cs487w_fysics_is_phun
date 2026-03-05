@@ -29,6 +29,7 @@ export default function PlayerJoin() {
 
     try {
       const res = await httpPostJson("/join-session", {
+        player_type: "player",
         room_code: roomCode.trim().toUpperCase(),
         player_name: playerName.trim(),
       });

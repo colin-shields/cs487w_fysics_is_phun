@@ -26,20 +26,19 @@ function hostHeaders() {
 
 /**
  * Upload a deck CSV (and optional images) to the backend.
- *
- * FastAPI:
- *   upload_deck(file: UploadFile = File(...), images: Optional[List[UploadFile]] = None)
- *
- * IMPORTANT:
- * - CSV field name must be "file"
- * - Images field name must be "images" (repeated)
- *
- * @param {File} csvFile
- * @param {File[]|FileList} imageFiles optional
+ * Now includes deckName to prevent naming collisions.
+ * * @param {File} csvFile
+ * @param {File[]} imageFiles optional
+ * @param {string} deckName optional custom name for the deck
  */
-export async function uploadDeckCsv(csvFile, imageFiles = []) {
+export async function uploadDeckApi(csvFile, imageFiles = [], deckName = "") {
   const formData = new FormData();
   formData.append("file", csvFile);
+
+  // If a custom name is provided, send it to the backend
+  if (deckName) {
+    formData.append("deck_name", deckName);
+  }
 
   // images are optional; safe to pass empty list
   Array.from(imageFiles || []).forEach((img) => {

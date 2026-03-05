@@ -356,7 +356,7 @@ export default function HostGame() {
             <div>Deck: {activeDeck.name}</div>
             <div>Room Code: {roomCode}</div>
             <div className="mt-2 text-xs text-slate-400">
-              ℹ️ Timers and answer tallying will be implemented next
+              Timers and answer tallying will be implemented next
             </div>
           </div>
         </section>

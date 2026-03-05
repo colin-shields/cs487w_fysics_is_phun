@@ -12,10 +12,15 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { listDecksApi, getDeckDetailApi, deleteDeckApi } from "../../api/decks.js";
+import { getHostCode } from "../../utils/hostAuth.js";
+import {
+  listDecksApi,
+  getDeckDetailApi,
+  deleteDeckApi,
+} from "../../api/decks.js";
 import { useDeck } from "../../state/DeckContext.jsx";
 import { buildUrl } from "../../api/httpClient";
-import Modal from "./Modal.jsx"; 
+import Modal from "./Modal.jsx";
 import DeckCreateCard from "./DeckCreateCard.jsx";
 import DeckUploadCard from "./DeckUploadCard.jsx";
 
@@ -57,7 +62,9 @@ export default function DeckListPanel() {
 
     if (!res.ok) {
       if ([404, 405, 501].includes(res.status)) {
-        setError("Deck listing is not available yet (server endpoint /decks not implemented).");
+        setError(
+          "Deck listing is not available yet (server endpoint /decks not implemented).",
+        );
       } else if (res.status === 401 || res.status === 403) {
         setError("Not authorized. Please log in again with the host code.");
       } else {
@@ -72,7 +79,9 @@ export default function DeckListPanel() {
     const filenames = Array.isArray(payload) ? payload : payload?.decks;
 
     if (!Array.isArray(filenames)) {
-      setError("Unexpected response format from server (expected a list of filenames).");
+      setError(
+        "Unexpected response format from server (expected a list of filenames).",
+      );
       setBusy(false);
       return;
     }
@@ -93,7 +102,7 @@ export default function DeckListPanel() {
         // Expected detail shape:
         // { deck_id: filename, questions: { status:"success", data:[...] } }
         return detailRes.data;
-      })
+      }),
     );
 
     setDecks(detailedDecks);
@@ -136,7 +145,10 @@ export default function DeckListPanel() {
 
   async function onDeleteDeck(deck) {
     if (!deck?.deck_id) return;
-    if (!window.confirm(`Delete deck "${deck.deck_id}"? This cannot be undone.`)) return;
+    if (
+      !window.confirm(`Delete deck "${deck.deck_id}"? This cannot be undone.`)
+    )
+      return;
     setBusy(true);
     setError("");
     const res = await deleteDeckApi(deck.deck_id);
@@ -152,17 +164,56 @@ export default function DeckListPanel() {
     setBusy(false);
   }
 
-  const selectedQuestions = useMemo(() => getQuestionsArray(selectedDeck), [selectedDeck]);
+  async function onDownloadBackup(deck) {
+    if (!deck?.deck_id) return;
+
+    try {
+      const code = getHostCode(); // Use your helper function here!
+
+      const response = await fetch(
+        buildUrl(`/decks/${deck.deck_id}/download`),
+        {
+          method: "GET",
+          headers: {
+            "X-Host-Code": code || "",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = deck.deck_id;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Backup failed:", err);
+      alert(`Could not download backup: ${err.message}`);
+    }
+  }
+
+  const selectedQuestions = useMemo(
+    () => getQuestionsArray(selectedDeck),
+    [selectedDeck],
+  );
   const selectedStatus = selectedDeck?.questions?.status;
 
-return (
+  return (
     <section className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-      
       {/* 1. CONDENSED HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5 mb-5">
         <div>
           <h1 className="text-xl font-semibold">Stored Decks</h1>
-          <p className="text-xs text-slate-400">Manage your "Fysics is Phun" question library</p>
+          <p className="text-xs text-slate-400">
+            Manage your "Fysics is Phun" question library
+          </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -189,24 +240,25 @@ return (
       </div>
 
       {/* 2. MODAL COMPONENTS */}
-      <Modal 
-        isOpen={isCreateOpen} 
-        onClose={() => setIsCreateOpen(false)} 
+      <Modal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
         title="Manual Deck Creator"
       >
-        <DeckCreateCard /> 
+        <DeckCreateCard />
       </Modal>
 
-      <Modal 
-        isOpen={isUploadOpen} 
-        onClose={() => setIsUploadOpen(false)} 
+      <Modal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
         title="CSV Deck Uploader"
       >
         <DeckUploadCard />
       </Modal>
 
       <p className="mt-2 text-sm text-slate-300">
-        Click a deck to view full details. Use “Set Active” to mark it for session setup.
+        Click a deck to view full details. Use “Set Active” to mark it for
+        session setup.
       </p>
 
       {/* Error */}
@@ -225,7 +277,7 @@ return (
 
       {/* List + Detail */}
       {decks.length > 0 && (
-  <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
           {/* Deck list */}
           <div className="grid gap-3 lg:col-span-1">
             {decks.map((deck, idx) => {
@@ -246,28 +298,55 @@ return (
                       className="text-left"
                       title="View deck details"
                     >
-                      <div className="font-semibold text-slate-100">{title}</div>
-                      <div className="mt-1 text-xs text-slate-400">{count} question(s)</div>
+                      <div className="font-semibold text-slate-100">
+                        {title}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        {count} question(s)
+                      </div>
                     </button>
 
                     <div className="flex gap-1">
                       <button
                         onClick={() => onSetActive(deck)}
                         disabled={activeDeck?.deckId === deck?.deck_id || busy}
-                        className={`rounded-lg px-3 py-2 text-xs font-semibold
-                          ${activeDeck?.deckId === deck?.deck_id
-                            ? "bg-slate-600 text-slate-300 cursor-not-allowed"
-                            : "bg-emerald-600 text-white hover:bg-emerald-500"}`
-
-                          }
-                        
-                            title={
+                        className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors
+    ${
+      activeDeck?.deckId === deck?.deck_id
+        ? "bg-emerald-600 text-white cursor-default" // Active is now Green
+        : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
+    }`}
+                        title={
                           activeDeck?.deckId === deck?.deck_id
-                            ? "This deck is already active"
+                            ? "This is the current active deck"
                             : "Sets this as Active Deck for later session setup"
                         }
                       >
-                        {activeDeck?.deckId === deck?.deck_id ? "(Active)" : "Set Active"}
+                        {activeDeck?.deckId === deck?.deck_id
+                          ? "Active"
+                          : "Set Active"}
+                      </button>
+
+                      <button
+                        onClick={() => onDownloadBackup(deck)}
+                        disabled={busy}
+                        className="rounded-lg bg-indigo-600 px-2.5 py-2 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors flex items-center justify-center"
+                        title="Download CSV Backup"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                          />
+                        </svg>
                       </button>
 
                       <button
@@ -288,7 +367,9 @@ return (
           {/* Detail panel */}
           <div className="rounded-lg border border-slate-800 bg-slate-950/30 p-4 lg:col-span-2">
             {!selectedDeck ? (
-              <div className="text-sm text-slate-300">Select a deck to view its questions.</div>
+              <div className="text-sm text-slate-300">
+                Select a deck to view its questions.
+              </div>
             ) : (
               <>
                 <div>
@@ -297,7 +378,8 @@ return (
                     {selectedDeck.deck_id}
                   </div>
                   <div className="mt-1 text-xs text-slate-400">
-                    Status: {selectedStatus || "unknown"} · {selectedQuestions.length} question(s)
+                    Status: {selectedStatus || "unknown"} ·{" "}
+                    {selectedQuestions.length} question(s)
                   </div>
                 </div>
 
@@ -317,17 +399,30 @@ return (
                     <table className="min-w-full text-left text-xs">
                       <thead className="bg-slate-950/70 text-slate-300">
                         <tr>
-                          <th className="px-3 py-2 font-semibold">Question_ID</th>
-                          <th className="px-3 py-2 font-semibold">Question_Text</th>
-                          <th className="px-3 py-2 font-semibold">Correct_Answer</th>
-                          <th className="px-3 py-2 font-semibold">Predefined_Fake</th>
+                          <th className="px-3 py-2 font-semibold">
+                            Question_ID
+                          </th>
+                          <th className="px-3 py-2 font-semibold">
+                            Question_Text
+                          </th>
+                          <th className="px-3 py-2 font-semibold">
+                            Correct_Answer
+                          </th>
+                          <th className="px-3 py-2 font-semibold">
+                            Predefined_Fake
+                          </th>
                           <th className="px-3 py-2 font-semibold">Image</th>
                         </tr>
                       </thead>
                       <tbody className="text-slate-200">
                         {selectedQuestions.map((q, i) => (
-                          <tr key={q.Question_ID ?? i} className="border-t border-slate-800">
-                            <td className="px-3 py-2 align-top">{q.Question_ID ?? i + 1}</td>
+                          <tr
+                            key={q.Question_ID ?? i}
+                            className="border-t border-slate-800"
+                          >
+                            <td className="px-3 py-2 align-top">
+                              {q.Question_ID ?? i + 1}
+                            </td>
                             <td className="px-3 py-2 align-top whitespace-pre-wrap">
                               {q.Question_Text ?? ""}
                             </td>
@@ -342,7 +437,9 @@ return (
                                 imageErrors[q.Question_ID] ? (
                                   <div className="text-xs text-rose-400 break-all">
                                     <div>Failed to load</div>
-                                    <div className="mt-1 font-mono text-rose-300">{q.Image_Link}</div>
+                                    <div className="mt-1 font-mono text-rose-300">
+                                      {q.Image_Link}
+                                    </div>
                                   </div>
                                 ) : (
                                   <img
@@ -352,13 +449,17 @@ return (
                                         : buildUrl(q.Image_Link)
                                     }
                                     alt={`q${q.Question_ID}`}
-                                    onError={() => handleImageError(q.Question_ID)}
+                                    onError={() =>
+                                      handleImageError(q.Question_ID)
+                                    }
                                     className="max-h-12 max-w-16 rounded cursor-pointer hover:ring-2 hover:ring-indigo-500"
                                     title="Click to view full image"
                                   />
                                 )
                               ) : (
-                                <span className="text-slate-400 text-xs">No image</span>
+                                <span className="text-slate-400 text-xs">
+                                  No image
+                                </span>
                               )}
                             </td>
                           </tr>
@@ -373,7 +474,5 @@ return (
         </div>
       )}
     </section>
-
-    
   );
 }
