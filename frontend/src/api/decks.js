@@ -10,7 +10,7 @@
  * - etc.
  */
 
-import { httpGet, httpPostForm, httpPostJson, httpDelete } from "./httpClient";
+import { httpGet, httpPostForm, httpPostJson, httpDelete, httpPutJson } from "./httpClient";
 import { getHostCode } from "../utils/hostAuth";
 
 /**
@@ -62,10 +62,19 @@ export function getDeckDetailApi(filename) {
 
 /**
  * Future: persist a deck to the backend (makeshift DB).
- * Safe to call later once /decks exists.
  */
 export function saveDeckApi(payload) {
   return httpPostJson("/save-deck", payload, hostHeaders());
+}
+
+/**
+ * Update an existing deck by overwriting it on the server.
+ * @param {string} filename  The exact filename of the deck (e.g. "physics_w3.csv")
+ * @param {object} payload   { name: string, questions: QuestionModel[] }
+ */
+export function updateDeckApi(filename, payload) {
+  if (!filename) return Promise.resolve({ ok: false, status: 400, data: null, error: "No filename" });
+  return httpPutJson(`/decks/${filename}`, payload, hostHeaders());
 }
 
 /**

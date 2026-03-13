@@ -327,11 +327,10 @@ export default function DeckUploadCard() {
                     uploadedDeckPreview.length === 0 ||
                     wasActivated
                   }
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                    wasActivated
-                      ? "bg-slate-700 text-slate-400 cursor-default"
-                      : "bg-emerald-600 text-white hover:bg-emerald-500"
-                  }`}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${wasActivated
+                    ? "bg-slate-700 text-slate-400 cursor-default"
+                    : "bg-emerald-600 text-white hover:bg-emerald-500"
+                    }`}
                 >
                   {wasActivated ? "Active Deck Set" : "Set as Active Deck"}
                 </button>

@@ -23,6 +23,7 @@ import { buildUrl } from "../../api/httpClient";
 import Modal from "./Modal.jsx";
 import DeckCreateCard from "./DeckCreateCard.jsx";
 import DeckUploadCard from "./DeckUploadCard.jsx";
+import { downloadTextFile } from "../../utils/download.js";
 
 /**
  * Given a deck detail object from backend:
@@ -51,6 +52,8 @@ export default function DeckListPanel() {
   const [imageErrors, setImageErrors] = useState({}); // track failed image loads
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingDeck, setEditingDeck] = useState(null);
 
   async function loadDecks() {
     setBusy(true);
@@ -164,6 +167,20 @@ export default function DeckListPanel() {
     setBusy(false);
   }
 
+  function onEditDeck(deck) {
+    if (!deck?.deck_id) return;
+    setEditingDeck({ name: deck.deck_id, questions: getQuestionsArray(deck) });
+    setIsEditOpen(true);
+  }
+
+  async function handleEditClose(saved) {
+    setIsEditOpen(false);
+    setEditingDeck(null);
+    if (saved) await loadDecks();
+  }
+
+
+
   async function onDownloadBackup(deck) {
     if (!deck?.deck_id) return;
 
@@ -183,6 +200,7 @@ export default function DeckListPanel() {
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);
       }
+
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -256,6 +274,20 @@ export default function DeckListPanel() {
         <DeckUploadCard />
       </Modal>
 
+      <Modal
+        isOpen={isEditOpen}
+        onClose={() => handleEditClose(false)}
+        title="Edit Deck"
+      >
+        {editingDeck && (
+          <DeckCreateCard
+            initialDeck={editingDeck}
+            isEditing={true}
+            onClose={handleEditClose}
+          />
+        )}
+      </Modal>
+
       <p className="mt-2 text-sm text-slate-300">
         Click a deck to view full details. Use “Set Active” to mark it for
         session setup.
@@ -288,9 +320,8 @@ export default function DeckListPanel() {
               return (
                 <div
                   key={deck?.deck_id || idx}
-                  className={`rounded-lg border bg-slate-950/30 p-4 ${
-                    isSelected ? "border-indigo-500" : "border-slate-800"
-                  }`}
+                  className={`rounded-lg border bg-slate-950/30 p-4 ${isSelected ? "border-indigo-500" : "border-slate-800"
+                    }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <button
@@ -311,11 +342,10 @@ export default function DeckListPanel() {
                         onClick={() => onSetActive(deck)}
                         disabled={activeDeck?.deckId === deck?.deck_id || busy}
                         className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors
-    ${
-      activeDeck?.deckId === deck?.deck_id
-        ? "bg-emerald-600 text-white cursor-default" // Active is now Green
-        : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
-    }`}
+    ${activeDeck?.deckId === deck?.deck_id
+                            ? "bg-emerald-600 text-white cursor-default" // Active is now Green
+                            : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
+                          }`}
                         title={
                           activeDeck?.deckId === deck?.deck_id
                             ? "This is the current active deck"
@@ -347,6 +377,15 @@ export default function DeckListPanel() {
                             d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                           />
                         </svg>
+                      </button>
+
+                      <button
+                        onClick={() => onEditDeck(deck)}
+                        disabled={busy}
+                        className="rounded-lg bg-amber-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                        title="Edit this deck"
+                      >
+                        Edit
                       </button>
 
                       <button

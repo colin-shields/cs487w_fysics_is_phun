@@ -12,6 +12,8 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { buildUrl } from "../../api/httpClient";
 import confetti from "canvas-confetti";
+import { useDeck } from "../../state/DeckContext.jsx";
+
 
 export default function HostLeaderboard() {
   const location = useLocation();
@@ -19,6 +21,130 @@ export default function HostLeaderboard() {
   const { roomCode } = location.state || {};
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submissions, setSubmissions] = useState({});
+  const [choices, setChoices] = useState({});
+  const [scores, setScores] = useState({});
+  const [roundBreakdown, setRoundBreakdown] = useState({});
+  const { activeDeck } = useDeck();
+  
+
+
+  function buildSessionResults(submissions, choices, scores, roundBreakdown) {
+    // submissions = {
+    //   [qIdx]: {
+    //     [entryIdx]: { player: "Alice", text: "fake answer" },
+    //     ...
+    //   }
+    // }
+    //
+    // choices = {
+    //   [qIdx]: {
+    //     [entryIdx]: { player: "Alice", text: "selected answer" },
+    //     ...
+    //   }
+    // }
+
+    const questionIds = [...new Set([
+      ...Object.keys(submissions || {}),
+      ...Object.keys(choices || {})
+    ])].sort((a, b) => Number(a) - Number(b)); 
+
+    const players = new Set();
+
+    for (const qid of questionIds) {
+      for (const entry of Object.values(submissions[qid] || {})) {
+        if (entry?.player) players.add(entry.player);
+      }
+      for (const entry of Object.values(choices[qid] || {})) {
+        if (entry?.player) players.add(entry.player);
+      }
+    }
+
+
+    const headers = ["Player Name"];
+    for (const qid of Object.values(activeDeck.questions)) {
+      headers.push(`Q: ${qid.Question_Text}\nCorrect Answer: ${qid.Correct_Answer}`);
+    }
+    headers.push("Final Score");   
+
+    const rows = [];
+
+    for (const playerName of players) {
+      const row = [playerName];
+
+      for (let qid = 0; qid < headers.length -2; qid+=1) {
+        let submissionText = "";
+        let choiceText = "";
+
+        for (const entry of Object.values(submissions[qid] || {})) {
+          if (entry?.player === playerName) {
+            submissionText = entry.text ?? "";
+            break;
+          }
+        }
+
+        for (const entry of Object.values(choices[qid] || {})) {
+          if (entry?.player === playerName) {
+            choiceText = entry.text ?? "";
+            break;
+          }
+        }
+
+        const bd = roundBreakdown?.[qid]?.[playerName];
+        const bdText = bd
+          ? `Correct:${bd.correct_pts ?? 0} Fooled:${bd.fool_pts ?? 0} JuryBest:${bd.jury_best_pts ?? 0} JuryWorst:-${bd.jury_worst_pts ?? 0} RoundTotal:${bd.round_total ?? 0}`
+          : "";
+        const cellValue = `Submission: ${submissionText}\nChoice: ${choiceText}${bdText ? `\n${bdText}` : ""}`;
+        row.push(cellValue);
+      }
+
+      let scoreText = scores[playerName] ?? ""
+      row.push(`Points: ${scoreText}`)
+
+      rows.push(row);
+    }
+
+    return { headers, rows };
+  }
+
+  function toCSV(headers, rows) {
+    const escapeCSV = (value) => {
+      const str = String(value ?? "");
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const lines = [
+      headers.map(escapeCSV).join(","),
+      ...rows.map((row) => row.map(escapeCSV).join(","))
+    ];
+
+    return lines.join("\n");
+  }
+
+  function handleExportResults() {
+    const { headers, rows } = buildSessionResults(submissions, choices, scores, roundBreakdown);
+
+    if (!rows.length) {
+      console.warn("No session results available to export.");
+      return;
+    }
+
+    const csv = toCSV(headers, rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `session-results-${roomCode || "room"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+  }
 
   useEffect(() => {
     if (!roomCode) {
@@ -26,17 +152,19 @@ export default function HostLeaderboard() {
       return;
     }
 
-    // Fetch session status to get updated player list
     async function fetchPlayers() {
       try {
         const res = await fetch(buildUrl(`/session-status/${roomCode}`));
         if (res.ok) {
           const data = await res.json();
-          // Sort players by score (highest first)
-          const sortedPlayers = (data.players || []).sort(
-            (a, b) => b.score - a.score,
-          );
+          const scoreboard = data.scoreboard || [];
+          const sortedPlayers = scoreboard.sort((a, b) => b[1] - a[1]);
+
           setPlayers(sortedPlayers);
+          setChoices(data.choices || {});
+          setSubmissions(data.submissions || {});
+          setScores(data.scores || {});
+          setRoundBreakdown(data.round_breakdown || {});
         }
       } catch (err) {
         console.error("Failed to fetch session status", err);
@@ -53,18 +181,16 @@ export default function HostLeaderboard() {
   // Confetti effect
   useEffect(() => {
     if (!loading && players.length > 0) {
-      // --- INITIAL BURST ---
       const count = 200;
       const defaults = {
         origin: { y: 0.7 },
         spread: 90,
-        ticks: 200, // Particles last longer on screen
-        gravity: 0.8, // Lower gravity = more gradual, floaty fall
-        startVelocity: 45, // Higher velocity = shoots farther
+        ticks: 200,
+        gravity: 0.8,
+        startVelocity: 45,
         scalar: 1.2,
       };
 
-      // Fire from left
       confetti({
         ...defaults,
         particleCount: count / 2,
@@ -72,7 +198,6 @@ export default function HostLeaderboard() {
         origin: { x: 0, y: 0.6 },
       });
 
-      // Fire from right
       confetti({
         ...defaults,
         particleCount: count / 2,
@@ -80,7 +205,6 @@ export default function HostLeaderboard() {
         origin: { x: 1, y: 0.6 },
       });
 
-      // --- 2. GRADUAL FOUNTAIN ---
       const duration = 15 * 1000;
       const animationEnd = Date.now() + duration;
 
@@ -91,7 +215,6 @@ export default function HostLeaderboard() {
           return clearInterval(interval);
         }
 
-        // We use a lower particle count but higher "ticks" for a smoother look
         confetti({
           particleCount: 2,
           angle: 60,
@@ -111,7 +234,7 @@ export default function HostLeaderboard() {
           gravity: 0.7,
           colors: ["#10b981", "#6366f1"],
         });
-      }, 300); // Firing very small amounts frequently creates a "fountain" effect
+      }, 300);
 
       return () => clearInterval(interval);
     }
@@ -122,74 +245,100 @@ export default function HostLeaderboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-950">
+    <div className="min-h-screen bg-[#050114] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950 via-[#0a0523] to-[#050114] flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 border-b border-slate-800 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+      <header className="sticky top-0 z-40 border-b border-indigo-500/20 bg-[#0a0523]/80 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
           <div>
-            <div className="text-sm text-slate-400">Game Complete</div>
-            <div className="font-semibold">Final Results</div>
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">Game Complete</div>
+            <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">Final Results</div>
           </div>
-          <div className="text-sm text-slate-300">
+          <div className="text-sm font-medium text-indigo-200">
             Room:{" "}
-            <span className="font-semibold text-emerald-400">{roomCode}</span>
+            <span className="font-bold text-emerald-400 ml-1 tracking-wider">{roomCode}</span>
           </div>
         </div>
       </header>
 
       {/* Main */}
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-8">
-          <h1 className="text-3xl font-bold text-center mb-2 text-emerald-400">
+      <main className="mx-auto w-full max-w-4xl px-4 py-8 flex-grow">
+        <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_40px_rgba(139,92,246,0.1)] p-8 md:p-12 relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-indigo-500/5 to-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+
+          <h1 className="text-4xl md:text-5xl font-black text-center mb-10 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)] tracking-tight">
             Game Finished!
           </h1>
 
           {players.length > 0 ? (
-            <div className="mb-8 text-center">
-              <div className="text-sm uppercase tracking-widest text-slate-500">
-                Champion
-              </div>
-              <div className="text-xl font-black text-white">
-                Winner:{" "}
-                <span className="text-emerald-400">
-                  {players[0].name || players[0]}
-                </span>
+            <div className="mb-12 text-center relative">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl"></div>
+              <div className="inline-block relative z-10">
+                <div className="text-xs font-black uppercase tracking-[0.3em] text-emerald-400 mb-2 drop-shadow-md">
+                  ★ Champion ★
+                </div>
+                <div className="text-2xl md:text-3xl font-bold text-white px-8 py-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/40 shadow-[0_0_30px_rgba(16,185,129,0.2)] backdrop-blur-sm">
+                  {players[0].name || players[0][0] || "Unknown Player"}
+                </div>
               </div>
             </div>
           ) : (
-            <p className="text-center text-slate-300 mb-8">
+            <p className="text-center text-indigo-300 font-medium mb-10 text-lg">
               Thank you for playing!
             </p>
           )}
 
           {loading ? (
-            <div className="text-center text-slate-300">Loading players...</div>
+            <div className="text-center text-indigo-300 flex flex-col items-center justify-center py-8">
+              <svg className="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Loading final results...
+            </div>
           ) : (
-            <div className="space-y-3">
-              <div className="text-sm font-semibold text-slate-400 mb-4">
-                Players ({players.length})
+            <div className="space-y-4 max-w-2xl mx-auto relative z-10">
+              <div className="flex items-center justify-between border-b border-indigo-500/20 pb-3 mb-4">
+                <div className="text-sm font-bold uppercase tracking-widest text-indigo-400">
+                  Leaderboard
+                </div>
+                <div className="text-xs font-bold bg-[#0a0523]/60 border border-indigo-500/30 px-3 py-1 rounded-full text-indigo-300">
+                  {players.length} Players
+                </div>
               </div>
+
               {players.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {players.map((player, idx) => (
                     <div
                       key={idx}
-                      className="rounded-lg bg-slate-800/50 p-4 flex items-center justify-between"
+                      className="rounded-xl bg-indigo-950/40 border border-indigo-500/20 p-4 flex items-center justify-between transition-all hover:bg-indigo-900/40 shadow-inner group"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-semibold">
-                          {idx + 1}
+                      <div className="flex items-center gap-4">
+                        <div
+                          className={`h-12 w-12 rounded-full flex items-center justify-center text-sm font-black shadow-md ${
+                            idx === 0
+                              ? "bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-[0_0_15px_rgba(52,211,153,0.4)] border border-emerald-300"
+                              : idx === 1
+                              ? "bg-gradient-to-br from-slate-300 to-slate-500 text-slate-900 shadow-[0_0_10px_rgba(203,213,225,0.3)] border border-slate-300"
+                              : idx === 2
+                              ? "bg-gradient-to-br from-amber-600 to-orange-800 text-amber-100 shadow-[0_0_10px_rgba(217,119,6,0.3)] border border-amber-600"
+                              : "bg-[#0a0523]/80 text-indigo-300 border border-indigo-500/40"
+                          }`}
+                        >
+                          #{idx + 1}
                         </div>
-                        <div className="text-slate-100 font-medium">
-                          {player}
+                        <div className={`font-bold tracking-wide ${idx === 0 ? "text-xl text-white drop-shadow-sm" : "text-lg text-indigo-100"}`}>
+                          {player[0] || player.name || "Unknown Player"}
                         </div>
                       </div>
-                      <div className="text-xs text-slate-400">Player</div>
+                      <div className="text-xs font-bold uppercase text-indigo-400/50 group-hover:text-indigo-400 transition-colors">
+                        {player[1] !== undefined ? `${player[1]} pts` : ""}
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center text-slate-400">
+                <div className="text-center text-indigo-300/60 font-medium py-8 bg-[#0a0523]/30 rounded-xl border border-indigo-500/10 border-dashed">
                   No players joined this session
                 </div>
               )}
@@ -197,13 +346,23 @@ export default function HostLeaderboard() {
           )}
 
           {/* Actions */}
-          <div className="mt-8 flex gap-4">
-            <button
-              onClick={onReturnHome}
-              className="flex-1 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
-            >
-              Return to Home
-            </button>
+          <div className="mt-12 flex justify-center relative z-10 w-full max-w-2xl mx-auto">
+            <div className="w-full flex flex-col gap-4">
+              <button
+                onClick={handleExportResults}
+                disabled={loading || players.length === 0}
+                className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-8 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                Export Results as CSV
+              </button>
+
+              <button
+                onClick={onReturnHome}
+                className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-8 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-indigo-500/50"
+              >
+                Return to Dashboard
+              </button>
+            </div>
           </div>
         </div>
       </main>

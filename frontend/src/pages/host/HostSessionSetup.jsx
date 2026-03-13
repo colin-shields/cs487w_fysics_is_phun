@@ -53,7 +53,7 @@ export default function HostSessionSetup() {
     try {
       const res = await httpPostJson(
         "/create-session",
-        { deck_id: activeDeck.deckId || activeDeck.name },
+        { deck_id: activeDeck.deckId || activeDeck.name, enable_worst_fake: enableWorstFake },
         headers
       );
 
@@ -88,23 +88,23 @@ export default function HostSessionSetup() {
   const canCreateSession = Boolean(activeDeck);
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-[#0a0523] to-[#0d011c]">
+      <header className="sticky top-0 z-40 border-b border-indigo-900/50 bg-[#0a0523]/80 backdrop-blur shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div>
-            <div className="text-sm text-slate-400">Host View</div>
-            <div className="font-semibold">Session Setup</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-indigo-300">Host View</div>
+            <div className="text-lg font-bold text-white tracking-wide">Session Setup</div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
             <Link
-              className="text-sm text-slate-300 hover:text-white underline underline-offset-4"
+              className="text-sm font-semibold uppercase tracking-wider text-indigo-300 hover:text-white transition-colors"
               to="/host"
             >
               Host Home
             </Link>
             <Link
-              className="text-sm text-slate-300 hover:text-white underline underline-offset-4"
+              className="text-sm font-semibold uppercase tracking-wider text-indigo-300 hover:text-white transition-colors"
               to="/host/decks"
             >
               Deck Manager
@@ -113,17 +113,20 @@ export default function HostSessionSetup() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-8 space-y-6">
+      <main className="mx-auto max-w-5xl px-6 py-10 relative space-y-8">
+        {/* Subtle background glow */}
+        <div className="absolute top-10 left-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+
         {!activeDeck ? (
-          <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-            <h2 className="text-lg font-semibold">No Active Deck Selected</h2>
-            <p className="mt-2 text-sm text-slate-300">
+          <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-8 relative z-10">
+            <h2 className="text-xl font-bold text-white mb-2">No Active Deck Selected</h2>
+            <p className="mt-2 text-sm text-indigo-200/80 leading-relaxed">
               A deck must be selected before creating a session. Upload a CSV and click
               “Set as Active Deck.”
             </p>
             <Link
               to="/host/decks"
-              className="mt-4 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              className="mt-6 inline-flex rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3 text-sm font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] transition-all"
             >
               Go to Deck Manager
             </Link>
@@ -131,32 +134,37 @@ export default function HostSessionSetup() {
         ) : (
           <>
             {/* Deck Summary */}
-            <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="text-lg font-semibold">Active Deck</h2>
-              <div className="mt-2 text-sm text-slate-300">
-                <div>
-                  <span className="font-semibold text-slate-100">Name:</span> {deckSummary.name}
+            <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-8 relative z-10 relative overflow-hidden">
+              {/* Subtle top border glow */}
+              <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-purple-500 to-transparent opacity-50"></div>
+
+              <h2 className="text-xl font-bold text-white mb-4">Active Deck</h2>
+              <div className="mt-2 text-sm text-indigo-200/90 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-indigo-300 uppercase tracking-wider text-xs">Name:</span>
+                  <span className="text-white font-medium">{deckSummary.name}</span>
                 </div>
-                <div>
-                  <span className="font-semibold text-slate-100">Questions:</span> {deckSummary.count}
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-indigo-300 uppercase tracking-wider text-xs">Questions:</span>
+                  <span className="bg-purple-600/20 text-purple-300 py-0.5 px-2 rounded-md text-xs font-bold border border-purple-500/30">{deckSummary.count}</span>
                 </div>
-                <div className="mt-2 text-xs text-slate-400">
-                  Preview: {deckSummary.firstQuestion}
+                <div className="mt-4 pt-3 border-t border-indigo-500/20 text-xs text-indigo-300/70 italic">
+                  Preview: "{deckSummary.firstQuestion}"
                 </div>
               </div>
             </section>
 
             {/* Session Settings */}
-            <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="text-lg font-semibold">Session Settings</h2>
-              <p className="mt-2 text-sm text-slate-300">
+            <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-8 relative z-10">
+              <h2 className="text-xl font-bold text-white mb-2">Session Settings</h2>
+              <p className="mt-2 text-sm text-indigo-200/80 leading-relaxed mb-6">
                 These settings will be sent to the backend when creating the session.
               </p>
 
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <div className="text-sm font-semibold">Stage 1 timer (seconds)</div>
-                  <div className="mt-1 text-xs text-slate-400">In this stage, the question is presented and players can submit their answers.</div>
+              <div className="grid gap-6 sm:grid-cols-2">
+                <label className="block bg-indigo-950/40 border border-indigo-500/20 p-5 rounded-xl">
+                  <div className="text-sm font-semibold text-white mb-1">Stage 1 timer (seconds)</div>
+                  <div className="text-xs text-indigo-300/70 mb-4 h-8">In this stage, the question is presented and players can submit their answers.</div>
                   <input
                     type="number"
                     min={10}
@@ -165,14 +173,13 @@ export default function HostSessionSetup() {
                     onChange={(e) =>
                       setStage1Seconds(clampInt(e.target.value, 10, 300, DEFAULTS.stage1Seconds))
                     }
-                    className="mt-2 w-full rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100"
+                    className="w-full rounded-xl border border-indigo-500/30 bg-indigo-950/60 px-4 py-3 text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 transition-all shadow-inner"
                   />
-              
                 </label>
 
-                <label className="block">
-                  <div className="text-sm font-semibold">Stage 2 timer (seconds)</div>
-                  <div className="mt-1 text-xs text-slate-400">Players must choose which answer they believe is correct.</div>
+                <label className="block bg-indigo-950/40 border border-indigo-500/20 p-5 rounded-xl">
+                  <div className="text-sm font-semibold text-white mb-1">Stage 2 timer (seconds)</div>
+                  <div className="text-xs text-indigo-300/70 mb-4 h-8">Players must choose which answer they believe is correct.</div>
                   <input
                     type="number"
                     min={10}
@@ -181,61 +188,61 @@ export default function HostSessionSetup() {
                     onChange={(e) =>
                       setStage2Seconds(clampInt(e.target.value, 10, 300, DEFAULTS.stage2Seconds))
                     }
-                    className="mt-2 w-full rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100"
+                    className="w-full rounded-xl border border-indigo-500/30 bg-indigo-950/60 px-4 py-3 text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 transition-all shadow-inner"
                   />
                 </label>
               </div>
 
-              <label className="mt-4 flex items-center gap-3">
+              <label className="mt-6 flex items-start gap-4 p-5 rounded-xl border border-indigo-500/20 bg-indigo-950/40 cursor-pointer hover:bg-indigo-900/40 transition-colors">
                 <input
                   type="checkbox"
                   checked={enableWorstFake}
                   onChange={(e) => setEnableWorstFake(e.target.checked)}
-                  className="h-4 w-4"
+                  className="mt-1 h-5 w-5 rounded border-indigo-500/50 bg-indigo-950/60 text-purple-600 focus:ring-purple-500/50 focus:ring-offset-0"
                 />
                 <div>
-                  <div className="text-sm font-semibold">Enable “Worst Fake” (-1)</div>
-                  <div className="text-xs text-slate-400">Jury will be allowed to choose a "worst fake" submission to award -1 points.</div>
+                  <div className="text-sm font-bold text-white mb-1">Enable “Worst Fake” (-1)</div>
+                  <div className="text-xs text-indigo-300/80 leading-relaxed">Jury will be allowed to choose a "worst fake" submission to award -1 points.</div>
                 </div>
               </label>
 
               {/* Create Session */}
-              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-slate-400">
+              <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-6 border-t border-indigo-500/20">
+                <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">
                   Create a live session and share the code with players.
                 </div>
 
                 <button
                   disabled={!canCreateSession || busyCreating}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                  className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-8 py-3.5 text-base font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] hover:scale-[1.02] disabled:hover:scale-100 disabled:opacity-50 transition-all"
                   onClick={onCreateSession}
                 >
-                  {busyCreating ? "Creating..." : "Create Session"}
+                  {busyCreating ? "Creating Session..." : "Create Session"}
                 </button>
               </div>
 
               {/* Display the settings that would be sent (transparent + useful for debugging) */}
-              <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                <div className="text-xs text-slate-300 font-semibold mb-1">Session Config</div>
-                <pre className="whitespace-pre-wrap break-words text-xs text-slate-200">
-{JSON.stringify(
-  {
-    deckName: activeDeck.name,
-    questionCount: activeDeck.questions.length,
-    settings: {
-      stage1Seconds,
-      stage2Seconds,
-      enableWorstFake,
-    },
-  },
-  null,
-  2
-)}
+              <div className="mt-8 rounded-xl border border-indigo-500/20 bg-[#0a0523]/60 p-4 font-mono text-xs">
+                <div className="text-indigo-400/80 font-bold mb-2 tracking-widest uppercase">// Session Payload Debug</div>
+                <pre className="whitespace-pre-wrap break-words text-indigo-200/90">
+                  {JSON.stringify(
+                    {
+                      deckName: activeDeck.name,
+                      questionCount: activeDeck.questions.length,
+                      settings: {
+                        stage1Seconds,
+                        stage2Seconds,
+                        enableWorstFake,
+                      },
+                    },
+                    null,
+                    2
+                  )}
                 </pre>
               </div>
 
               {creationError && (
-                <div className="mt-4 rounded-lg border border-rose-900/60 bg-rose-950/40 p-3 text-sm text-rose-100">
+                <div className="mt-6 rounded-lg border border-pink-500/40 bg-pink-950/40 p-4 text-sm text-pink-200 shadow-lg">
                   {creationError}
                 </div>
               )}

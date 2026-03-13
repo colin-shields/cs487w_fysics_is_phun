@@ -16,24 +16,23 @@ export default function HostHome() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-[#0a0523] to-[#0d011c]">
       {/* Top bar */}
-      <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-slate-800 flex items-center justify-center">
-              <span className="font-bold">Φ</span>
+      <header className="sticky top-0 z-10 border-b border-indigo-900/50 bg-[#0a0523]/80 backdrop-blur shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 shadow-[0_0_15px_rgba(139,92,246,0.4)] text-white">
+              <span className="font-bold text-lg">Φ</span>
             </div>
             <div>
-              <div className="text-sm text-slate-400">Host View</div>
-              <div className="font-semibold">Fysics is Phun</div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-indigo-300">Host View</div>
+              <div className="text-lg font-bold text-white tracking-wide">Fysics is Phun</div>
             </div>
           </div>
 
-          {/* Use Link to avoid full page reload */}
           <button
             onClick={() => window.open("/join", "_blank")}
-            className="text-sm text-slate-300 hover:text-white underline underline-offset-4"
+            className="text-sm font-semibold text-indigo-300 hover:text-white underline underline-offset-4 transition-colors"
           >
             Test Join Page ↗
           </button>
@@ -41,62 +40,65 @@ export default function HostHome() {
       </header>
 
       {/* Main content */}
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-semibold">Host Dashboard</h1>
-        <p className="mt-2 text-slate-300">
+      <main className="mx-auto max-w-5xl px-6 py-10 relative">
+        {/* Subtle background glow */}
+        <div className="absolute top-10 left-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <h1 className="text-3xl font-bold text-white tracking-wide">Host Dashboard</h1>
+        <p className="mt-2 text-sm text-indigo-200/80 font-medium">
           Host flow: Session Setup → Create Session → Join Code/QR → Lobby → Run game.
         </p>
 
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
+        <div className="mt-8 grid gap-6 md:grid-cols-2">
           {/* Card 1 */}
-          <section className="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="flex flex-col rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-6 hover:bg-indigo-900/30 hover:shadow-[0_0_25px_rgba(139,92,246,0.15)] transition-all">
             <div className="flex-grow">
-              <h2 className="text-lg font-semibold">Create Session</h2>
-              <p className="mt-2 text-sm text-slate-300">
+              <h2 className="text-xl font-bold text-white mb-2">Create Session</h2>
+              <p className="text-sm text-indigo-200/80 leading-relaxed">
                 Configure timers and options, then create a session (join code + host URL).
               </p>
             </div>
 
             <button
               onClick={navigateToSessionSetup}
-              className="mt-4 w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+              className="mt-6 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-3 text-sm font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] hover:scale-[1.02] transition-all"
             >
               Go to Session Setup
             </button>
           </section>
 
           {/* Card 2 */}
-          <section className="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="flex flex-col rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-6 hover:bg-indigo-900/30 hover:shadow-[0_0_25px_rgba(139,92,246,0.15)] transition-all">
             <div className="flex-grow">
-              <h2 className="text-lg font-semibold">Decks (CSV)</h2>
-              <p className="mt-2 text-sm text-slate-300">
+              <h2 className="text-xl font-bold text-white mb-2">Decks (CSV)</h2>
+              <p className="text-sm text-indigo-200/80 leading-relaxed">
                 Upload a CSV deck, preview it, then set it as the Active Deck.
               </p>
             </div>
 
             <button
               onClick={navigateToDeckManager}
-              className="mt-4 w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              className="mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 text-sm font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] transition-all"
             >
               Open Deck Manager
             </button>
           </section>
         </div>
 
-        <div className="mt-6">
+        <div className="mt-8 rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-6">
           <ActiveDeckCard />
         </div>
 
-        <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-          <h2 className="text-lg font-semibold">Planned Host Flow</h2>
-          <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-300">
+        <div className="mt-8 rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.05)] p-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-purple-600/10 rounded-bl-full blur-[30px]"></div>
+          <h2 className="text-lg font-bold text-white mb-4">Planned Host Flow</h2>
+          <ol className="list-decimal space-y-2 pl-5 text-sm font-medium text-indigo-200/80">
             <li>Session Setup (timers, options)</li>
             <li>Create Session → display Join Code + Join URL + QR</li>
             <li>Lobby: roster updates + assign Jury (min 1) + Start Game</li>
             <li>Stage 1 → Stage 2 → Results → Final + Export</li>
           </ol>
         </div>
-
       </main>
     </div>
   );

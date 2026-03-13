@@ -1,29 +1,22 @@
 /**
- * PlayerJoin.jsx
- * Player join page.
- *
- * Purpose:
- * - Players enter a room code (4 chars from host)
- * - Players enter their name
- * - Call backend POST /join-session
- * - On success, navigate to player wait/game view
+ * JuryHome.jsx
+ * Juror join page — mirrors PlayerJoin structure.
+ * Juror enters room code + name → POST /join-session → navigate to /jury/vote
  */
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { httpPostJson } from "../api/httpClient";
-import { pickRandomPlayerAvatarUrl } from "../utils/playerAvatars";
+import { httpPostJson } from "../../api/httpClient";
 
-export default function PlayerJoin() {
+export default function JuryHome() {
   const navigate = useNavigate();
 
   const [roomCode, setRoomCode] = useState("");
-  const [playerName, setPlayerName] = useState("");
+  const [jurorName, setJurorName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [selectedAvatarUrl] = useState(() => pickRandomPlayerAvatarUrl());
 
-  const canJoin = roomCode.trim().length > 0 && playerName.trim().length > 0;
+  const canJoin = roomCode.trim().length > 0 && jurorName.trim().length > 0;
 
   async function onJoin() {
     setBusy(true);
@@ -31,17 +24,16 @@ export default function PlayerJoin() {
 
     try {
       const res = await httpPostJson("/join-session", {
-        player_type: "player",
+        player_type: "juror",
         room_code: roomCode.trim().toUpperCase(),
-        player_name: playerName.trim(),
-        avatar_url: selectedAvatarUrl,
+        player_name: jurorName.trim(),
       });
 
       if (!res.ok) {
         if (res.status === 404) {
           setError("Room not found. Check the code and try again.");
         } else if (res.status === 400) {
-          setError("Game has already started or room is full.");
+          setError("Game has already started or the session is unavailable.");
         } else {
           setError(`Failed to join (HTTP ${res.status}).`);
         }
@@ -49,14 +41,10 @@ export default function PlayerJoin() {
         return;
       }
 
-      const assignedAvatarUrl = res?.data?.avatar_url || selectedAvatarUrl;
-
-      // Success: navigate to player waiting/game view
-      navigate("/player/game", {
+      navigate("/jury/vote", {
         state: {
           roomCode: roomCode.trim().toUpperCase(),
-          playerName: playerName.trim(),
-          playerAvatarUrl: assignedAvatarUrl,
+          jurorName: jurorName.trim(),
         },
       });
     } catch (err) {
@@ -65,10 +53,8 @@ export default function PlayerJoin() {
     }
   }
 
-  function handleKeyPress(e) {
-    if (e.key === "Enter" && canJoin && !busy) {
-      onJoin();
-    }
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && canJoin && !busy) onJoin();
   }
 
   return (
@@ -77,8 +63,9 @@ export default function PlayerJoin() {
         <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_20px_rgba(139,92,246,0.1)] p-8">
           {/* Title */}
           <div className="text-center">
-            <h1 className="text-3xl font-bold text-white tracking-wide">Physics is Phun</h1>
-            <p className="mt-2 text-sm text-indigo-200/70 uppercase tracking-widest font-semibold">Join a live game</p>
+            <div className="text-4xl mb-3">⚖</div>
+            <h1 className="text-3xl font-bold text-white tracking-wide">Jury Panel</h1>
+            <p className="mt-2 text-sm text-indigo-200/70 uppercase tracking-widest font-semibold">Join as a Juror</p>
           </div>
 
           {/* Error */}
@@ -88,7 +75,7 @@ export default function PlayerJoin() {
             </div>
           )}
 
-          {/* Room Code Input */}
+          {/* Room Code */}
           <div className="mt-8">
             <label className="block text-xs font-semibold text-indigo-200 uppercase tracking-wider">Room Code</label>
             <input
@@ -96,7 +83,7 @@ export default function PlayerJoin() {
               placeholder="e.g., ABC1"
               value={roomCode}
               onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyDown}
               disabled={busy}
               maxLength={4}
               className="mt-2 w-full rounded-xl border border-indigo-500/30 bg-indigo-950/30 px-4 py-3 text-lg font-semibold tracking-widest text-center text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 disabled:opacity-50 transition-all"
@@ -104,15 +91,15 @@ export default function PlayerJoin() {
             <p className="mt-2 text-center text-xs text-indigo-300/60">Ask the host for the 4-character code</p>
           </div>
 
-          {/* Player Name Input */}
+          {/* Juror Name */}
           <div className="mt-6">
             <label className="block text-xs font-semibold text-indigo-200 uppercase tracking-wider">Your Name</label>
             <input
               type="text"
               placeholder="Enter your name"
-              value={playerName}
-              onChange={(e) => setPlayerName(e.target.value)}
-              onKeyPress={handleKeyPress}
+              value={jurorName}
+              onChange={(e) => setJurorName(e.target.value)}
+              onKeyDown={handleKeyDown}
               disabled={busy}
               maxLength={50}
               className="mt-2 w-full rounded-xl border border-indigo-500/30 bg-indigo-950/30 px-4 py-3 text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 disabled:opacity-50 transition-all"
@@ -123,14 +110,13 @@ export default function PlayerJoin() {
           <button
             onClick={onJoin}
             disabled={!canJoin || busy}
-            className="mt-8 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 text-base font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] disabled:hover:scale-100 disabled:opacity-50 transition-all"
+            className="mt-8 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-3 text-base font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] hover:scale-[1.02] disabled:hover:scale-100 disabled:opacity-50 transition-all"
           >
-            {busy ? "Connecting..." : "Connect"}
+            {busy ? "Joining..." : "Join as Juror"}
           </button>
 
-          {/* Info */}
           <p className="mt-6 text-center text-xs text-indigo-300/50">
-            Your name will be visible to the host and other players
+            You'll be taken to the voting screen once the game reaches the jury phase
           </p>
         </div>
       </div>

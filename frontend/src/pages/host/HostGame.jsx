@@ -2,10 +2,9 @@
  * HostGame.jsx
  * Host Game View - Display questions to the host
  *
- * Purpose (MVP):
- * - Show current question being displayed to players
- * - Navigate through questions with next/previous buttons
- * - Later: add timers, show player answers, tally scores, jury view
+ * Phase order per round:
+ *   collecting → answers → results → jury → roundLeaderboard
+ * Then next question or end game.
  */
 
 import React, { useEffect, useState, useMemo } from "react";
@@ -14,12 +13,17 @@ import { useDeck } from "../../state/DeckContext.jsx";
 import { buildUrl, buildWsUrl } from "../../api/httpClient";
 import { getHostCode } from "../../utils/hostAuth";
 
-// Helper to convert asset paths to full backend URLs
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
   if (imagePath.startsWith("/assets/")) return buildUrl(imagePath);
   if (imagePath.startsWith("http")) return imagePath;
   return buildUrl(`/assets/${imagePath}`);
+}
+
+function fmtPts(n) {
+  if (n === undefined || n === null) return "—";
+  const rounded = Math.round(n * 100) / 100;
+  return rounded >= 0 ? `+${rounded}` : `${rounded}`;
 }
 
 export default function HostGame() {
@@ -30,52 +34,48 @@ export default function HostGame() {
 
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
-  const [phase, setPhase] = useState("collecting"); // collecting | answers | results
-  const [submissions, setSubmissions] = useState([]); // list of player names
+  // phases: collecting | answers | results | jury | roundLeaderboard
+  const [phase, setPhase] = useState("collecting");
+  const [submissions, setSubmissions] = useState([]);
   const [answerPool, setAnswerPool] = useState([]);
   const [resultStats, setResultStats] = useState(null);
+  const [juryVoteCount, setJuryVoteCount] = useState(0);
+  const [totalJurors, setTotalJurors] = useState(0);
+  const [roundBreakdown, setRoundBreakdown] = useState(null);
+  const [currentScores, setCurrentScores] = useState({});
   const wsRef = React.useRef(null);
 
-  // If no deck or room code, redirect
   useEffect(() => {
-    if (!activeDeck) {
-      navigate("/host");
-      return;
-    }
-    if (!roomCode) {
-      navigate("/host/lobby");
-      return;
-    }
+    if (!activeDeck) { navigate("/host"); return; }
+    if (!roomCode) { navigate("/host/lobby"); return; }
   }, [activeDeck, roomCode, navigate]);
 
-  // establish websocket connection for real-time question broadcasting
   useEffect(() => {
     if (!roomCode) return;
-    // use helper that picks up current host from window.location
     const wsUrl = buildWsUrl(`/ws/session/${roomCode}`);
-    console.log("HostGame opening websocket to", wsUrl);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      console.log("Host websocket connected");
-      setWsConnected(true);
-    };
+    ws.onopen = () => setWsConnected(true);
     ws.onclose = () => console.log("Host websocket closed");
     ws.onmessage = (evt) => {
-      console.log("Host received ws message", evt.data);
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === "submission") {
-          // someone submitted fake answer
           setSubmissions((prev) => [...prev, msg.player]);
         } else if (msg.type === "answers") {
-          // save answer pool and switch phase
           setAnswerPool(msg.answers || []);
           setPhase("answers");
         } else if (msg.type === "results") {
           setResultStats(msg.stats);
           setPhase("results");
+        } else if (msg.type === "jury_vote_count") {
+          setJuryVoteCount(msg.count);
+          setTotalJurors(msg.total_jurors);
+        } else if (msg.type === "round_scores") {
+          setRoundBreakdown(msg.breakdown || {});
+          setCurrentScores(msg.scores || {});
+          setPhase("roundLeaderboard");
         }
       } catch (e) {
         // ignore
@@ -98,43 +98,29 @@ export default function HostGame() {
 
   const questions = activeDeck.questions || [];
   const totalQuestions = questions.length;
-  const isFirstQuestion = currentQuestionIndex === 0;
   const isLastQuestion = currentQuestionIndex === totalQuestions - 1;
-
   const currentQuestion = questions[currentQuestionIndex] || {};
 
-  // helper that sends the current question over the socket (if available)
   function sendCurrentQuestion() {
-    if (
-      wsRef.current &&
-      wsRef.current.readyState === WebSocket.OPEN
-    ) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "question",
-          index: currentQuestionIndex,
-          question: currentQuestion,
-        })
-      );
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "question",
+        index: currentQuestionIndex,
+        question: currentQuestion,
+        correctAnswer: currentQuestion.Correct_Answer,
+      }));
     }
   }
 
-  // whenever question index changes we reset phase/submissions/stats
   useEffect(() => {
     setPhase("collecting");
     setSubmissions([]);
     setAnswerPool([]);
     setResultStats(null);
-    if (wsConnected) {
-      sendCurrentQuestion();
-    }
-  }, [currentQuestionIndex, currentQuestion, wsConnected]);
-
-  function goToPrevious() {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    }
-  }
+    setJuryVoteCount(0);
+    setRoundBreakdown(null);
+    if (wsConnected) sendCurrentQuestion();
+  }, [currentQuestionIndex, wsConnected]);
 
   function goToNext() {
     if (currentQuestionIndex < totalQuestions - 1) {
@@ -143,13 +129,9 @@ export default function HostGame() {
   }
 
   function broadcastAnswers() {
-    // compile answers: correct, predefined fake, plus submitted fakes
     const answerSet = [];
     if (currentQuestion.Correct_Answer) answerSet.push(currentQuestion.Correct_Answer);
     if (currentQuestion.Predefined_Fake) answerSet.push(currentQuestion.Predefined_Fake);
-    // submissions contain names only; server stores text – but host doesn't have those texts yet.
-    // We'll rely on server to keep them but we don't display them here.
-    // Send placeholder; players will combine correct/predefined and fakes locally
     wsRef.current.send(JSON.stringify({ type: "answers", answers: answerSet }));
     setPhase("answers");
   }
@@ -160,21 +142,27 @@ export default function HostGame() {
     }
   }
 
-  async function onEndGame() {
-    // Broadcast game finished message to all players via websocket
+  function startJuryPhase() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "game_finished",
-        })
-      );
+      wsRef.current.send(JSON.stringify({ type: "jury_phase", question_index: currentQuestionIndex }));
+      setPhase("jury");
     }
-    // Navigate to leaderboard
+  }
+
+  function requestJuryResults() {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "jury_results" }));
+    }
+  }
+
+  async function onEndGame() {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "game_finished" }));
+    }
     navigate("/host/leaderboard", { state: { roomCode } });
   }
 
   async function onExitGame() {
-    // cancel session on backend so players are notified
     try {
       const hostCode = getHostCode?.() || "";
       const headers = hostCode ? { "X-Host-Code": hostCode } : {};
@@ -185,22 +173,31 @@ export default function HostGame() {
     navigate("/host");
   }
 
+  // Sorted leaderboard for roundLeaderboard phase
+  const sortedLeaderboard = useMemo(() => {
+    return Object.entries(currentScores)
+      .map(([name, total]) => ({ name, total, ...roundBreakdown?.[name] }))
+      .sort((a, b) => b.total - a.total);
+  }, [currentScores, roundBreakdown]);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-950">
+    <div className="min-h-screen bg-[#050114] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950 via-[#0a0523] to-[#050114] flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 border-b border-slate-800 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+      <header className="sticky top-0 z-40 border-b border-indigo-500/20 bg-[#0a0523]/80 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div>
-            <div className="text-sm text-slate-400">Host View</div>
-            <div className="font-semibold">Game in Progress</div>
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">Host View</div>
+            <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">
+              Game in Progress
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-slate-300">
-              Room: <span className="font-semibold text-emerald-400">{roomCode}</span>
+          <div className="flex items-center gap-6">
+            <div className="text-sm font-medium text-indigo-200">
+              Room: <span className="font-bold text-emerald-400 ml-1 tracking-wider">{roomCode}</span>
             </div>
             <button
               onClick={onExitGame}
-              className="text-sm text-slate-300 hover:text-white underline underline-offset-4"
+              className="text-sm font-bold text-pink-400 hover:text-pink-300 underline underline-offset-4 transition-colors"
             >
               Exit Game
             </button>
@@ -208,93 +205,109 @@ export default function HostGame() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="mx-auto max-w-5xl px-4 py-8 space-y-6">
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 space-y-6 flex-grow flex flex-col">
         {/* Question Counter */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-          <div className="flex items-center justify-between">
+        <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/30 backdrop-blur-md p-6 shrink-0 relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
             <div>
-              <div className="text-sm text-slate-400">Question Progress</div>
-              <div className="mt-1 text-2xl font-semibold">
-                {currentQuestionIndex + 1} of {totalQuestions}
+              <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-1">Question Progress</div>
+              <div className="mt-1 text-3xl font-black text-white tracking-wide">
+                <span className="text-emerald-400">{currentQuestionIndex + 1}</span>
+                <span className="text-indigo-400 font-medium text-xl mx-1">/</span>
+                <span className="text-indigo-200">{totalQuestions}</span>
               </div>
             </div>
-            <div className="w-32 h-2 bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-indigo-600 transition-all duration-300"
-                style={{
-                  width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%`,
-                }}
-              />
+            <div className="flex items-center gap-4">
+              {/* Phase badge */}
+              <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
+                phase === "collecting" ? "bg-indigo-900/50 border-indigo-500/40 text-indigo-300" :
+                phase === "answers" ? "bg-purple-900/50 border-purple-500/40 text-purple-300" :
+                phase === "results" ? "bg-emerald-900/50 border-emerald-500/40 text-emerald-300" :
+                phase === "jury" ? "bg-amber-900/50 border-amber-500/40 text-amber-300" :
+                "bg-teal-900/50 border-teal-500/40 text-teal-300"
+              }`}>
+                {phase === "collecting" ? "Collecting Fakes" :
+                 phase === "answers" ? "Players Choosing" :
+                 phase === "results" ? "Results" :
+                 phase === "jury" ? "Jury Voting" :
+                 "Round Scores"}
+              </div>
+              <div className="w-48 h-3 bg-[#0a0523]/60 border border-indigo-500/30 rounded-full overflow-hidden shadow-inner">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-700 ease-out"
+                  style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
+                />
+              </div>
             </div>
           </div>
         </section>
 
         {/* Question Display */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-8">
-          {/* Question Text */}
-          <div className="mb-6">
-            <div className="text-sm text-slate-400 mb-2">Question Text</div>
-            <div className="text-2xl font-semibold text-slate-100">
+        <section className="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 backdrop-blur-md p-8 md:p-12 flex-grow flex flex-col justify-center relative">
+          <div className="absolute top-0 left-0 w-16 h-16 border-t-2 border-l-2 border-indigo-500/40 rounded-tl-2xl m-2 opacity-50"></div>
+          <div className="absolute bottom-0 right-0 w-16 h-16 border-b-2 border-r-2 border-purple-500/40 rounded-br-2xl m-2 opacity-50"></div>
+
+          <div className="mb-8 text-center max-w-3xl mx-auto w-full z-10">
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400 mb-4 flex items-center justify-center gap-2">
+              <span className="w-8 h-px bg-indigo-500/40"></span>
+              Current Question
+              <span className="w-8 h-px bg-indigo-500/40"></span>
+            </div>
+            <div className="text-3xl md:text-4xl font-black text-white leading-tight break-words drop-shadow-md">
               {currentQuestion.Question_Text || "(No question text)"}
             </div>
           </div>
 
-          {/* Question Image (if present) */}
           {currentQuestion.Image_Link && (
-            <div className="mb-6 rounded-lg overflow-hidden border border-slate-700">
+            <div className="mb-8 rounded-xl overflow-hidden border border-indigo-500/30 bg-[#0a0523]/60 mx-auto max-w-2xl relative z-10">
               <img
                 src={getImageUrl(currentQuestion.Image_Link)}
-                alt="Question"
-                className="w-full max-h-96 object-contain bg-slate-950"
+                alt="Question media"
+                className="w-full max-h-[400px] object-contain"
               />
             </div>
           )}
 
-          {/* Correct Answer */}
-          {phase === "results" && (
-            <div className="mb-4 rounded-lg border border-emerald-900/50 bg-emerald-950/30 p-4">
-              <div className="text-xs text-emerald-400 font-semibold mb-1">CORRECT ANSWER</div>
-              <div className="text-lg text-emerald-200">
-                {currentQuestion.Correct_Answer || "(No answer)"}
-              </div>
-            </div>
-          )}
-
-          {/* Predefined Fake */}
-          {phase === "results" && (
-            <div className="rounded-lg border border-rose-900/50 bg-rose-950/30 p-4">
-              <div className="text-xs text-rose-400 font-semibold mb-1">PREDEFINED FAKE</div>
-              <div className="text-lg text-rose-200">
-                {currentQuestion.Predefined_Fake || "(No fake answer)"}
+          {/* Correct Answer only (results + jury + roundLeaderboard phases) */}
+          {(phase === "results" || phase === "jury" || phase === "roundLeaderboard") && (
+            <div className="mt-auto mx-auto w-full max-w-sm z-10">
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 p-5 shadow-[0_0_20px_rgba(16,185,129,0.15)] flex flex-col items-center text-center">
+                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2 bg-emerald-900/40 px-3 py-1 rounded-full border border-emerald-500/30">CORRECT ANSWER</div>
+                <div className="text-xl md:text-2xl font-bold text-white">
+                  {currentQuestion.Correct_Answer || "(No answer)"}
+                </div>
               </div>
             </div>
           )}
         </section>
 
-        {/* Navigation Controls (phase‑aware) */}
-        <section className="flex gap-4">
+        {/* Navigation Controls (phase-aware) */}
+        <section className="flex flex-col sm:flex-row gap-4 shrink-0">
           <button
-            onClick={goToPrevious}
-            disabled={isFirstQuestion || phase !== "collecting"}
-            className="flex-1 rounded-lg bg-slate-700 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-slate-600 disabled:opacity-40"
+            onClick={goToNext}
+            disabled={phase !== "collecting"}
+            className="sm:w-1/4 rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-200 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 disabled:opacity-40 disabled:hover:bg-indigo-950/60 disabled:hover:text-indigo-200 disabled:hover:border-indigo-500/30 transition-all flex items-center justify-center gap-2 shadow-inner"
           >
-            ← Previous
+            ← Prev
           </button>
 
           {phase === "collecting" && (
             <button
               onClick={broadcastAnswers}
-              className="flex-1 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500"
+              className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
             >
-              Show Answers ({submissions.length} submitted)
+              Show Answers
+              <span className="bg-[#0a0523]/40 border border-indigo-400/30 px-2 py-0.5 rounded-full text-xs shadow-inner">
+                {submissions.length} submitted
+              </span>
             </button>
           )}
 
           {phase === "answers" && (
             <button
               onClick={requestResults}
-              className="flex-1 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
+              className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-emerald-500/50"
             >
               Show Results
             </button>
@@ -302,61 +315,159 @@ export default function HostGame() {
 
           {phase === "results" && (
             <button
-              onClick={isLastQuestion ? onEndGame : goToNext}
-              className="flex-1 rounded-lg px-4 py-3 text-sm font-semibold text-slate-100 transition-colors"
-              style={{
-                backgroundColor: isLastQuestion ? "rgb(34, 197, 94)" : "rgb(51, 65, 85)",
-              }}
+              onClick={startJuryPhase}
+              className="flex-1 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
             >
-              {isLastQuestion ? "🏁 End Game" : "Next →"}
+              <span>⚖</span> Start Jury Voting
+            </button>
+          )}
+
+          {phase === "jury" && (
+            <button
+              onClick={requestJuryResults}
+              className="flex-1 rounded-xl bg-gradient-to-r from-teal-600 to-cyan-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(20,184,166,0.3)] hover:shadow-[0_0_30px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              Show Round Scores
+            </button>
+          )}
+
+          {phase === "roundLeaderboard" && (
+            <button
+              onClick={isLastQuestion ? onEndGame : goToNext}
+              className={`flex-1 rounded-xl px-6 py-4 text-base font-bold text-white shadow-lg transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 ${
+                isLastQuestion
+                  ? "bg-gradient-to-r from-emerald-600 to-teal-500 shadow-[0_0_25px_rgba(16,185,129,0.4)] ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-slate-900"
+                  : "bg-indigo-600 hover:bg-indigo-500 shadow-[0_0_20px_rgba(79,70,229,0.3)]"
+              }`}
+            >
+              {isLastQuestion ? "End Game" : "Next Question →"}
             </button>
           )}
 
           <button
             onClick={onExitGame}
-            className="flex-1 rounded-lg bg-rose-700 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-rose-600"
+            className="shrink-0 sm:w-1/6 rounded-xl bg-pink-950/40 border border-pink-900/50 px-4 py-4 text-sm font-bold text-pink-400 hover:bg-pink-600 hover:text-white hover:border-transparent hover:shadow-[0_0_15px_rgba(219,39,119,0.5)] transition-all flex items-center justify-center"
           >
             Exit
           </button>
         </section>
 
-        {/* Phase-specific information */}
+        {/* Phase-specific info panels */}
         {phase === "collecting" && (
-          <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-            <div className="text-sm text-slate-300">
-              Waiting for players to submit fakes ({submissions.length})
+          <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-5 shadow-inner flex items-center justify-between">
+            <div className="text-sm font-bold text-indigo-200">Waiting for players to submit fakes</div>
+            <div className="flex -space-x-2">
+              {Array.from({ length: Math.min(submissions.length, 5) }).map((_, i) => (
+                <div key={i} className="w-8 h-8 rounded-full bg-indigo-600 border-2 border-[#0a0523] animate-pulse" style={{ animationDelay: `${i * 150}ms`, zIndex: 10 - i }}></div>
+              ))}
+              {submissions.length > 5 && (
+                <div className="w-8 h-8 rounded-full bg-indigo-800 border-2 border-[#0a0523] flex items-center justify-center text-[10px] font-bold text-white">
+                  +{submissions.length - 5}
+                </div>
+              )}
             </div>
           </section>
         )}
+
         {phase === "answers" && (
-          <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-            <div className="text-sm font-semibold text-slate-200 mb-2">Answers being shown</div>
-            <ul className="list-disc list-inside text-slate-300">
+          <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-6 shadow-inner">
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-4 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+              Answers shown to players
+            </div>
+            <div className="flex flex-wrap gap-3">
               {answerPool.map((ans, i) => (
-                <li key={i}>{ans}</li>
+                <div key={i} className="bg-[#0a0523]/60 border border-indigo-500/30 text-indigo-100 px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+                  {ans}
+                </div>
               ))}
-            </ul>
-          </section>
-        )}
-        {phase === "results" && resultStats && (
-          <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-            <div className="text-sm font-semibold text-slate-200 mb-2">Results</div>
-            <ul className="list-disc list-inside text-slate-300">
-              {Object.entries(resultStats).map(([ans,count]) => (
-                <li key={ans}>{ans}: {count}</li>
-              ))}
-            </ul>
+            </div>
           </section>
         )}
 
-        {/* Info Section */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">Deck & Timer Info (Coming Soon)</h3>
-          <div className="space-y-2 text-sm text-slate-300">
-            <div>Deck: {activeDeck.name}</div>
-            <div>Room Code: {roomCode}</div>
-            <div className="mt-2 text-xs text-slate-400">
-              Timers and answer tallying will be implemented next
+        {phase === "results" && resultStats && (
+          <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-6 shadow-inner">
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-4 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Voting Results
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {Object.entries(resultStats).map(([ans, count]) => {
+                const isCorrect = ans === currentQuestion.Correct_Answer;
+                return (
+                  <div key={ans} className={`flex items-center justify-between p-3 rounded-xl border ${isCorrect ? "border-emerald-500/40 bg-emerald-950/30" : "border-indigo-500/30 bg-[#0a0523]/60"}`}>
+                    <span className={`text-sm font-medium truncate pr-2 ${isCorrect ? "text-emerald-200" : "text-indigo-100"}`}>{ans}</span>
+                    <span className={`text-base font-black px-2 py-0.5 rounded-md ${isCorrect ? "bg-emerald-500/20 text-emerald-300" : "bg-indigo-900/50 text-indigo-300"}`}>{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {phase === "jury" && (
+          <section className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-6 shadow-inner">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-1 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                  Jury Deliberating
+                </div>
+                <div className="text-sm font-medium text-amber-200/80">Jurors are voting on the best fake answer</div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-black text-white">{juryVoteCount}<span className="text-amber-400/60 text-base font-medium">/{totalJurors}</span></div>
+                <div className="text-xs font-bold uppercase tracking-wider text-amber-400/60">votes in</div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {phase === "roundLeaderboard" && roundBreakdown && (
+          <section className="rounded-xl border border-teal-500/20 bg-teal-950/10 p-6 shadow-inner">
+            <div className="text-xs font-bold uppercase tracking-widest text-teal-300 mb-4 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+              Round Score Breakdown
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-indigo-500/20">
+                    <th className="text-left py-2 pr-4 text-xs font-bold uppercase tracking-wider text-indigo-400">Player</th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-emerald-400">Correct</th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-indigo-400">Fooled</th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-amber-400">Jury Best</th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-pink-400">Jury Worst</th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-teal-300">Round</th>
+                    <th className="text-right py-2 pl-4 text-xs font-bold uppercase tracking-wider text-white">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedLeaderboard.map((p, idx) => (
+                    <tr key={p.name} className={`border-b border-indigo-500/10 ${idx === 0 ? "bg-emerald-950/20" : ""}`}>
+                      <td className="py-3 pr-4 font-bold text-white flex items-center gap-2">
+                        {idx === 0 && <span className="text-emerald-400 text-xs">★</span>}
+                        {p.name}
+                      </td>
+                      <td className="text-center py-3 px-2 text-emerald-300 font-mono">{fmtPts(p.correct_pts)}</td>
+                      <td className="text-center py-3 px-2 text-indigo-300 font-mono">{fmtPts(p.fool_pts)}</td>
+                      <td className="text-center py-3 px-2 text-amber-300 font-mono">{fmtPts(p.jury_best_pts)}</td>
+                      <td className="text-center py-3 px-2 text-pink-300 font-mono">{fmtPts(p.jury_worst_pts ? -p.jury_worst_pts : 0)}</td>
+                      <td className="text-center py-3 px-2 font-black text-teal-300 font-mono">{fmtPts(p.round_total)}</td>
+                      <td className="text-right py-3 pl-4 font-black text-white">{Math.round((p.total ?? 0) * 100) / 100} pts</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* Info footer */}
+        <section className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/40 p-5 mt-auto opacity-70 hover:opacity-100 transition-opacity">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="text-sm font-medium text-indigo-200">
+              Deck: <span className="text-white font-bold">{activeDeck.name}</span>
             </div>
           </div>
         </section>

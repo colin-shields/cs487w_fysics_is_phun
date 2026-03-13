@@ -9,8 +9,9 @@
 // Required columns per your current deck format:
 // Question_ID, Question_Text, Correct_Answer, Predefined_Fake
 
-import React, { useMemo, useState } from "react";
-import { saveDeckApi, uploadAsset } from "../../api/decks";
+import React, { useEffect, useMemo, useState } from "react";
+import { saveDeckApi, updateDeckApi, uploadAsset } from "../../api/decks";
+import { buildUrl } from "../../api/httpClient";
 import { useDeck } from "../../state/DeckContext.jsx";
 
 function emptyRow() {
@@ -25,7 +26,7 @@ function emptyRow() {
   };
 }
 
-export default function DeckCreateCard() {
+export default function DeckCreateCard({ onClose, initialDeck, isEditing = false }) {
   const { setActiveDeck } = useDeck();
 
   const [deckName, setDeckName] = useState("");
@@ -35,6 +36,22 @@ export default function DeckCreateCard() {
   const [status, setStatus] = useState(null); // "success" | "error" | null
   const [message, setMessage] = useState("");
   const [raw, setRaw] = useState(null);
+
+  // Pre-populate state when opening in edit mode
+  useEffect(() => {
+    if (!isEditing || !initialDeck) return;
+    setDeckName(initialDeck.name || "");
+    if (Array.isArray(initialDeck.questions) && initialDeck.questions.length > 0) {
+      setRows(initialDeck.questions.map((q) => ({
+        Question_Text: q.Question_Text || "",
+        Correct_Answer: q.Correct_Answer || "",
+        Predefined_Fake: q.Predefined_Fake || "",
+        Image_File: null,
+        Image_Link: q.Image_Link || "",
+        Image_Preview: "",
+      })));
+    }
+  }, [isEditing, initialDeck]);
 
   // Convert UI rows -> backend “questions” payload with required keys.
   const questionsPayload = useMemo(() => {
@@ -156,7 +173,9 @@ export default function DeckCreateCard() {
       })),
     };
 
-    const res = await saveDeckApi(finalPayload);
+    const res = isEditing
+      ? await updateDeckApi(initialDeck.name, finalPayload)
+      : await saveDeckApi(finalPayload);
     setRaw(res.data);
 
     if (!res.ok) {
@@ -169,6 +188,12 @@ export default function DeckCreateCard() {
     // Success
     setStatus("success");
     setMessage("Deck saved successfully.");
+
+    // In edit mode: close the modal and let the parent refresh the list
+    if (isEditing && typeof onClose === "function") {
+      onClose(true);
+      return;
+    }
 
     // Make it easy for the Host to proceed:
     // set the saved deck as Active (for session setup later)
@@ -185,7 +210,7 @@ export default function DeckCreateCard() {
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Create a New Deck</h2>
+          <h2 className="text-lg font-semibold">{isEditing ? "Edit Deck" : "Create a New Deck"}</h2>
           <p className="mt-2 text-sm text-slate-300">
             Create a deck directly in the app.
           </p>
@@ -198,8 +223,9 @@ export default function DeckCreateCard() {
         <input
           value={deckName}
           onChange={(e) => setDeckName(e.target.value)}
+          disabled={isEditing}
           placeholder="e.g., Physics Basics Week 3"
-          className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-indigo-600"
+          className={`mt-2 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-indigo-600 ${isEditing ? "opacity-60 cursor-not-allowed" : ""}`}
         />
       </div>
 
@@ -265,7 +291,7 @@ export default function DeckCreateCard() {
                 <label className="text-xs font-semibold text-slate-300">Image (optional)</label>
                 {(r.Image_Preview || r.Image_Link) && (
                   <img
-                    src={r.Image_Preview || r.Image_Link}
+                    src={r.Image_Preview || (r.Image_Link.startsWith("http") ? r.Image_Link : buildUrl(r.Image_Link))}
                     alt="question"
                     className="mt-1 max-h-24 rounded"
                   />
@@ -299,7 +325,7 @@ export default function DeckCreateCard() {
           disabled={busy}
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
         >
-          {busy ? "Saving..." : "Save Deck"}
+          {busy ? (isEditing ? "Updating..." : "Saving...") : (isEditing ? "Update Deck" : "Save Deck")}
         </button>
 
         <div className="text-xs text-slate-400">

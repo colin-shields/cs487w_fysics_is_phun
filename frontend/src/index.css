@@ -21,10 +21,10 @@
 @keyframes juryGlowPulse {
   0%,
   100% {
-    box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+    box-shadow: 0 0 0 rgba(139, 92, 246, 0);
   }
   50% {
-    box-shadow: 0 0 22px rgba(251, 191, 36, 0.25);
+    box-shadow: 0 0 22px rgba(139, 92, 246, 0.35);
   }
 }
 

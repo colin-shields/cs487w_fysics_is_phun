@@ -125,6 +125,30 @@ export async function httpPostJson(path, body, extraHeaders = {}) {
 }
 
 /**
+ * PUT JSON helper.
+ * @param {string} path
+ * @param {object} body
+ * @param {object} extraHeaders optional additional headers (ex: X-Host-Code)
+ */
+export async function httpPutJson(path, body, extraHeaders = {}) {
+  const url = buildUrl(path);
+  try {
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await parseResponse(res);
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: err?.message || String(err) };
+  }
+}
+
+/**
  * DELETE helper.
  * @param {string} path
  * @param {object} extraHeaders optional additional headers

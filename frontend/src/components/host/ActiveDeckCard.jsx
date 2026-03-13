@@ -23,10 +23,10 @@ export default function ActiveDeckCard() {
           No active deck selected. Upload a deck and click “Set as Active Deck.”
         </p>
         <Link
-        to="/host/decks"
-        className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
+          to="/host/decks"
+          className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
         >
-        Manage Decks
+          Manage Decks
         </Link>
 
       </section>
