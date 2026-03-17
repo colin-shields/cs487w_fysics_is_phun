@@ -13,7 +13,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { buildUrl } from "../../api/httpClient";
 import confetti from "canvas-confetti";
 import { useDeck } from "../../state/DeckContext.jsx";
-
+import ResultViewer from "./ResultViewer";
 
 export default function HostLeaderboard() {
   const location = useLocation();
@@ -24,87 +24,122 @@ export default function HostLeaderboard() {
   const [submissions, setSubmissions] = useState({});
   const [choices, setChoices] = useState({});
   const [scores, setScores] = useState({});
+  const [showPrettyResults, setShowPrettyResults] = useState(false);
   const [roundBreakdown, setRoundBreakdown] = useState({});
   const { activeDeck } = useDeck();
-  
-
 
   function buildSessionResults(submissions, choices, scores, roundBreakdown) {
-    // submissions = {
-    //   [qIdx]: {
-    //     [entryIdx]: { player: "Alice", text: "fake answer" },
-    //     ...
-    //   }
-    // }
-    //
-    // choices = {
-    //   [qIdx]: {
-    //     [entryIdx]: { player: "Alice", text: "selected answer" },
-    //     ...
-    //   }
-    // }
-
-    const questionIds = [...new Set([
-      ...Object.keys(submissions || {}),
-      ...Object.keys(choices || {})
-    ])].sort((a, b) => Number(a) - Number(b)); 
-
     const players = new Set();
 
-    for (const qid of questionIds) {
-      for (const entry of Object.values(submissions[qid] || {})) {
-        if (entry?.player) players.add(entry.player);
-      }
-      for (const entry of Object.values(choices[qid] || {})) {
-        if (entry?.player) players.add(entry.player);
-      }
+    // 1. Safely collect all unique player names
+    if (submissions) {
+      Object.values(submissions).forEach((q) => {
+        Object.values(q).forEach((entry) => {
+          if (entry?.player) players.add(entry.player);
+        });
+      });
+    }
+    if (choices) {
+      Object.values(choices).forEach((q) => {
+        Object.values(q).forEach((entry) => {
+          if (entry?.player) players.add(entry.player);
+        });
+      });
     }
 
+    const playerList = Array.from(players).map((p) =>
+      Array.isArray(p) ? p[0] : p,
+    );
+    const questionList = Object.values(activeDeck.questions);
 
-    const headers = ["Player Name"];
-    for (const qid of Object.values(activeDeck.questions)) {
-      headers.push(`Q: ${qid.Question_Text}\nCorrect Answer: ${qid.Correct_Answer}`);
-    }
-    headers.push("Final Score");   
+    // 2. CREATE DYNAMIC HEADERS
+    // Row 1: The Question Text
+    // Row 2: The Column Labels
+    const headerRow1 = ["Player Info"];
+    const headerRow2 = ["Player Name"];
 
-    const rows = [];
+    questionList.forEach((q, index) => {
+      // We add 4 columns per question, so we pad headerRow1 with 3 empty strings
+      headerRow1.push(
+        `Q${index + 1}: ${q.Question_Text} (Correct: ${q.Correct_Answer})`,
+        "",
+        "",
+        "",
+      );
+      headerRow2.push("Submitted", "Chose", "Fooled Whom?", "Points");
+    });
 
-    for (const playerName of players) {
+    headerRow1.push("Game Totals");
+    headerRow2.push("Final Score");
+
+    const rows = [headerRow1, headerRow2];
+
+    // Object to track totals for the Summary Row
+    const questionTotals = {};
+
+    // 3. FILL PLAYER DATA
+    for (const playerName of playerList) {
       const row = [playerName];
 
-      for (let qid = 0; qid < headers.length -2; qid+=1) {
-        let submissionText = "";
-        let choiceText = "";
+      questionList.forEach((question) => {
+        const qid = question.Question_ID;
 
-        for (const entry of Object.values(submissions[qid] || {})) {
-          if (entry?.player === playerName) {
-            submissionText = entry.text ?? "";
-            break;
+        let mySubmission = "";
+        let myChoice = "";
+        let fooledPlayers = [];
+
+        // Find player's submission
+        const qSub = submissions[qid] || {};
+        Object.values(qSub).forEach((entry) => {
+          if (entry.player === playerName) mySubmission = entry.text || "";
+        });
+
+        // Find player's choice
+        const qCho = choices[qid] || {};
+        Object.values(qCho).forEach((entry) => {
+          if (entry.player === playerName) myChoice = entry.text || "";
+        });
+
+        // Who did this player fool? (Check everyone else's choices)
+        Object.values(qCho).forEach((entry) => {
+          if (entry.text === mySubmission && entry.player !== playerName) {
+            fooledPlayers.push(entry.player);
           }
-        }
+        });
 
-        for (const entry of Object.values(choices[qid] || {})) {
-          if (entry?.player === playerName) {
-            choiceText = entry.text ?? "";
-            break;
-          }
-        }
-
+        // Points Breakdown
         const bd = roundBreakdown?.[qid]?.[playerName];
-        const bdText = bd
-          ? `Correct:${bd.correct_pts ?? 0} Fooled:${bd.fool_pts ?? 0} JuryBest:${bd.jury_best_pts ?? 0} JuryWorst:-${bd.jury_worst_pts ?? 0} RoundTotal:${bd.round_total ?? 0}`
-          : "";
-        const cellValue = `Submission: ${submissionText}\nChoice: ${choiceText}${bdText ? `\n${bdText}` : ""}`;
-        row.push(cellValue);
-      }
+        const pts = bd ? bd.round_total || 0 : 0;
 
-      let scoreText = scores[playerName] ?? ""
-      row.push(`Points: ${scoreText}`)
+        // Track points for the summary row
+        questionTotals[qid] = (questionTotals[qid] || 0) + pts;
 
+        row.push(mySubmission);
+        row.push(myChoice);
+        row.push(fooledPlayers.join(", ") || "Nobody");
+        row.push(pts);
+      });
+
+      // Final Score Column
+      row.push(scores[playerName] || 0);
       rows.push(row);
     }
 
-    return { headers, rows };
+    // 4. CREATE SUMMARY ROW (The Footer)
+    const summaryRow = ["TOTAL POINTS AWARDED"];
+    questionList.forEach((question) => {
+      const qid = question.Question_ID;
+      // We leave Submission, Choice, and Fooled empty for the summary, just show Total Points
+      summaryRow.push("", "", "Q Total:", questionTotals[qid] || 0);
+    });
+
+    // Calculate total of all scores
+    const totalGamePoints = Object.values(scores).reduce((a, b) => a + b, 0);
+    summaryRow.push(totalGamePoints);
+
+    rows.push(summaryRow);
+
+    return { headers: [], rows };
   }
 
   function toCSV(headers, rows) {
@@ -118,31 +153,33 @@ export default function HostLeaderboard() {
 
     const lines = [
       headers.map(escapeCSV).join(","),
-      ...rows.map((row) => row.map(escapeCSV).join(","))
+      ...rows.map((row) => row.map(escapeCSV).join(",")),
     ];
 
     return lines.join("\n");
   }
 
   function handleExportResults() {
-    const { headers, rows } = buildSessionResults(submissions, choices, scores, roundBreakdown);
+    const { rows } = buildSessionResults(
+      submissions,
+      choices,
+      scores,
+      roundBreakdown,
+    );
 
-    if (!rows.length) {
-      console.warn("No session results available to export.");
-      return;
-    }
+    if (!rows.length) return;
 
-    const csv = toCSV(headers, rows);
+    // Pass an empty array for headers since rows[0] and rows[1] are the headers
+    const csv = toCSV([], rows);
+
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement("a");
     link.href = url;
     link.download = `session-results-${roomCode || "room"}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
     URL.revokeObjectURL(url);
   }
 
@@ -250,12 +287,18 @@ export default function HostLeaderboard() {
       <header className="sticky top-0 z-40 border-b border-indigo-500/20 bg-[#0a0523]/80 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
           <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">Game Complete</div>
-            <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">Final Results</div>
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">
+              Game Complete
+            </div>
+            <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">
+              Final Results
+            </div>
           </div>
           <div className="text-sm font-medium text-indigo-200">
             Room:{" "}
-            <span className="font-bold text-emerald-400 ml-1 tracking-wider">{roomCode}</span>
+            <span className="font-bold text-emerald-400 ml-1 tracking-wider">
+              {roomCode}
+            </span>
           </div>
         </div>
       </header>
@@ -289,9 +332,25 @@ export default function HostLeaderboard() {
 
           {loading ? (
             <div className="text-center text-indigo-300 flex flex-col items-center justify-center py-8">
-              <svg className="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <svg
+                className="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-500 mb-4"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
               </svg>
               Loading final results...
             </div>
@@ -319,15 +378,17 @@ export default function HostLeaderboard() {
                             idx === 0
                               ? "bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-[0_0_15px_rgba(52,211,153,0.4)] border border-emerald-300"
                               : idx === 1
-                              ? "bg-gradient-to-br from-slate-300 to-slate-500 text-slate-900 shadow-[0_0_10px_rgba(203,213,225,0.3)] border border-slate-300"
-                              : idx === 2
-                              ? "bg-gradient-to-br from-amber-600 to-orange-800 text-amber-100 shadow-[0_0_10px_rgba(217,119,6,0.3)] border border-amber-600"
-                              : "bg-[#0a0523]/80 text-indigo-300 border border-indigo-500/40"
+                                ? "bg-gradient-to-br from-slate-300 to-slate-500 text-slate-900 shadow-[0_0_10px_rgba(203,213,225,0.3)] border border-slate-300"
+                                : idx === 2
+                                  ? "bg-gradient-to-br from-amber-600 to-orange-800 text-amber-100 shadow-[0_0_10px_rgba(217,119,6,0.3)] border border-amber-600"
+                                  : "bg-[#0a0523]/80 text-indigo-300 border border-indigo-500/40"
                           }`}
                         >
                           #{idx + 1}
                         </div>
-                        <div className={`font-bold tracking-wide ${idx === 0 ? "text-xl text-white drop-shadow-sm" : "text-lg text-indigo-100"}`}>
+                        <div
+                          className={`font-bold tracking-wide ${idx === 0 ? "text-xl text-white drop-shadow-sm" : "text-lg text-indigo-100"}`}
+                        >
                           {player[0] || player.name || "Unknown Player"}
                         </div>
                       </div>
@@ -346,25 +407,51 @@ export default function HostLeaderboard() {
           )}
 
           {/* Actions */}
-          <div className="mt-12 flex justify-center relative z-10 w-full max-w-2xl mx-auto">
-            <div className="w-full flex flex-col gap-4">
+          <div className="mt-12 flex flex-col items-center relative z-10 w-full">
+            <div className="w-full flex flex-col gap-3 items-center">
+              {/* View Details Button - Shorter and less wide */}
+              <button
+                onClick={() => setShowPrettyResults(!showPrettyResults)}
+                className="w-full max-w-md rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] hover:shadow-[0_0_25px_rgba(37,99,235,0.5)] hover:scale-[1.01] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-blue-500/50"
+              >
+                {showPrettyResults ? "Hide Game Details" : "View Game Details"}
+              </button>
+
+              {/* Download Button - Shorter and less wide */}
               <button
                 onClick={handleExportResults}
                 disabled={loading || players.length === 0}
-                className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-8 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="w-full max-w-md rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 text-sm font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] hover:scale-[1.01] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               >
-                Export Results as CSV
+                Download Game Details (CSV)
               </button>
 
+              {/* Return Home Button - Shorter and less wide */}
               <button
                 onClick={onReturnHome}
-                className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-8 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-indigo-500/50"
+                className="w-full max-w-md rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3 text-sm font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.01] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-indigo-500/50"
               >
                 Return to Dashboard
               </button>
             </div>
           </div>
-        </div>
+        </div>{" "}
+        {/* End of card */}
+        {/* Full-width container for the results view */}
+        {showPrettyResults && (
+          <div className="mt-12 w-full animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="rounded-2xl border border-indigo-500/30 bg-[#0a0523]/60 backdrop-blur-xl p-4 md:p-8 shadow-2xl">
+              <ResultViewer
+                data={buildSessionResults(
+                  submissions,
+                  choices,
+                  scores,
+                  roundBreakdown,
+                )}
+              />
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
