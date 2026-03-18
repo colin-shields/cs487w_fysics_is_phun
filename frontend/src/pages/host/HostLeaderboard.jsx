@@ -50,7 +50,7 @@ export default function HostLeaderboard() {
     const playerList = Array.from(players).map((p) =>
       Array.isArray(p) ? p[0] : p,
     );
-    const questionList = Object.values(activeDeck.questions);
+    const questionList = Object.values(activeDeck.questions);    
 
     // 2. CREATE DYNAMIC HEADERS
     // Row 1: The Question Text
@@ -78,11 +78,12 @@ export default function HostLeaderboard() {
     const questionTotals = {};
 
     // 3. FILL PLAYER DATA
-    for (const playerName of playerList) {
+    for (const playerName of Object.values(playerList)) {
       const row = [playerName];
 
       questionList.forEach((question) => {
-        const qid = question.Question_ID;
+        const qid = question.Question_ID -1 ; // Adjusting for 0-based index in submissions and choices
+
 
         let mySubmission = "";
         let myChoice = "";
@@ -91,7 +92,10 @@ export default function HostLeaderboard() {
         // Find player's submission
         const qSub = submissions[qid] || {};
         Object.values(qSub).forEach((entry) => {
-          if (entry.player === playerName) mySubmission = entry.text || "";
+          if (entry.player === playerName){ 
+            mySubmission = entry.text || ""
+
+          }
         });
 
         // Find player's choice
