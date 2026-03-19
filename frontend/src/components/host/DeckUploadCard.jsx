@@ -1,22 +1,3 @@
-/**
- * DeckUploadCard.jsx
- * Host Deck Upload UI.
- *
- * Behavior (Option 2):
- * - Upload does NOT automatically change the Active Deck.
- * - After successful upload, Host clicks "Set as Active Deck".
- *
- * Backend response (updated):
- *   {
- *     deck_id: "filename.csv",
- *     questions: { status: "success"|"error", data?: [...], message?: "..." }
- *   }
- *
- * Endpoint can also return:
- *   { deck_id, error: "CSV Parse Failed: ..." }
- *   { error: "..." }
- */
-
 import React, { useMemo, useState } from "react";
 import { uploadDeckApi } from "../../api/decks";
 import { downloadTextFile } from "../../utils/download";
@@ -27,367 +8,210 @@ const REQUIRED_COLUMNS = [
   "Question_Text",
   "Correct_Answer",
   "Predefined_Fake",
-  "Image_Link (optional)",
+  "Image_Link",
 ];
 
 function buildCsvTemplate() {
   const header = REQUIRED_COLUMNS.join(",");
   const rows = [
-    "1,What is the SI unit of force?,Newton,Joule",
-    "2,What is the acceleration due to gravity on Earth (approx.)?,9.8 m/s^2,9.8 km/s^2",
-    "3,What particle has a negative electric charge?,Electron,Proton",
-    "4,What is the speed of light in vacuum (approx.)?,3.0×10^8 m/s,3.0×10^6 m/s",
-    "5,What is the formula for kinetic energy?,KE = 1/2 m v^2,KE = m v",
-    "6,What is the SI unit of electric current?,Ampere,Volt",
+    "1,What is the only planet in our solar system that could float in water?,Saturn,Jupiter,https://example.com/saturn.jpg",
+    "2,What is the most abundant metal element in the Earth's crust?,Aluminum,Iron,",
   ];
   return [header, ...rows].join("\n");
 }
 
 function parseUploadResponse(uploadRes) {
   const payload = uploadRes?.data;
-
   if (!payload || typeof payload !== "object") {
-    return {
-      status: "error",
-      message: "Unexpected response from backend.",
-      deckId: null,
-      questions: [],
-    };
+    return { status: "error", message: "Unexpected response from backend." };
   }
-
-  // Top-level error from wrapper
   if (payload.error) {
-    return {
-      status: "error",
-      message: String(payload.error),
-      deckId: payload.deck_id || null,
-      questions: [],
-    };
+    return { status: "error", message: String(payload.error) };
   }
-
-  const deckId = payload.deck_id || null;
   const q = payload.questions;
-  if (!q || typeof q !== "object") {
-    return {
-      status: "error",
-      message: "Missing 'questions' in response.",
-      deckId,
-      questions: [],
-    };
+  if (q?.status === "success" && Array.isArray(q.data)) {
+    return { status: "success", questions: q.data, deckId: payload.deck_id };
   }
-
-  if (q.status === "success" && Array.isArray(q.data)) {
-    return {
-      status: "success",
-      message: null,
-      deckId,
-      questions: q.data,
-    };
-  }
-
-  if (q.status === "error") {
-    return {
-      status: "error",
-      message: q.message || "CSV validation failed.",
-      deckId,
-      questions: [],
-    };
-  }
-
-  return {
-    status: "error",
-    message: "Unexpected 'questions' format.",
-    deckId,
-    questions: [],
-  };
+  return { status: "error", message: q?.message || "CSV validation failed." };
 }
 
-export default function DeckUploadCard() {
+export default function DeckUploadCard({ onSuccess, existingDecks = [] }) {
   const { setActiveDeck } = useDeck();
-
   const [file, setFile] = useState(null);
-
-  // Optional images support (backend accepts them, MVP can ignore)
-  const [imageFiles, setImageFiles] = useState([]);
-
   const [busy, setBusy] = useState(false);
-
   const [customName, setCustomName] = useState("");
   const [wasActivated, setWasActivated] = useState(false);
+  const [result, setResult] = useState(null);
+  const [localError, setLocalError] = useState("");
 
-  // Stores what we show in the debug panel
-  const [result, setResult] = useState(null); //result is the raw upload response (or combined upload+create response)
-
-  // Preview from last successful upload
   const [uploadedDeckPreview, setUploadedDeckPreview] = useState(null);
   const [uploadedDeckName, setUploadedDeckName] = useState(null);
 
-  // Optional persistence status (won't crash app if /decks isn't implemented)
-  const [persistNote, setPersistNote] = useState(null);
-
   const templateCsv = useMemo(() => buildCsvTemplate(), []);
+
+  // --- ADDED THIS BACK ---
+  const handleDownloadTemplate = () => {
+    downloadTextFile("deck_template.csv", templateCsv, "text/csv");
+  };
 
   function onFileChange(e) {
     const f = e.target.files?.[0] || null;
     setFile(f);
-
-    // Reset UI
     setResult(null);
-    setUploadedDeckPreview(null);
-    setUploadedDeckName(null);
-    setPersistNote(null);
-  }
-
-  function onImagesChange(e) {
-    const files = Array.from(e.target.files || []);
-    setImageFiles(files);
-  }
-
-  function downloadTemplate() {
-    downloadTextFile("deck_template.csv", templateCsv, "text/csv");
+    setLocalError("");
+    setWasActivated(false);
   }
 
   async function onUpload() {
     if (!file) return;
-
+    setLocalError("");
     setBusy(true);
-    setResult(null);
-    setUploadedDeckPreview(null);
-    setUploadedDeckName(null);
-    setPersistNote(null);
-    setWasActivated(false); // Reset feedback for the new upload
 
-    // Calculate name: User input OR filename minus .csv
-    const finalName = customName.trim() || file.name.replace(/\.csv$/i, "");
+    // 1. Determine the name you actually want
+    const baseName = customName.trim() || file.name.replace(/\.csv$/i, "");
+    const finalFilename = `${baseName}.csv`;
 
-    // Call the updated API function with 3 arguments
-    const uploadRes = await uploadDeckApi(file, imageFiles, finalName);
+    // 2. Local Duplicate Check (Case Insensitive)
+    const isDuplicate = existingDecks.some(
+      (d) => d.deck_id?.toLowerCase() === finalFilename.toLowerCase(),
+    );
 
-    console.log("Upload response:", uploadRes);
+    if (isDuplicate) {
+      setLocalError(
+        `A deck named "${baseName}" already exists in the manager.`,
+      );
+      setBusy(false);
+      return;
+    }
+
+    // Create a "Renamed" file object
+    const renamedFile = new File([file], finalFilename, { type: file.type });
+
+    // 4. Perform Upload with the new file object
+    const uploadRes = await uploadDeckApi(renamedFile, [], baseName);
+
     setResult(uploadRes);
-
     const parsed = parseUploadResponse(uploadRes);
-    console.log("Parsed upload response:", parsed);
 
-    // Stop if upload failed
     if (!uploadRes.ok || parsed.status !== "success") {
       setBusy(false);
       return;
     }
 
-    // Success: show preview + use the finalName we decided on
+    // 5. Success
     setUploadedDeckPreview(parsed.questions);
-    setUploadedDeckName(finalName);
-
+    setUploadedDeckName(baseName);
     setBusy(false);
+
+    if (onSuccess) onSuccess();
   }
 
   function setAsActiveDeck() {
     if (!uploadedDeckPreview || !uploadedDeckName) return;
-
     setActiveDeck({
       name: uploadedDeckName,
       questions: uploadedDeckPreview,
       uploadedAt: Date.now(),
-      deckId: uploadedDeckName,
+      deckId: `${uploadedDeckName}.csv`,
     });
     setWasActivated(true);
   }
 
-  // Derived UI status for the upload response
   const parsed = result ? parseUploadResponse(result) : null;
-  const backendStatus = parsed?.status || null;
-  const backendMessage = parsed?.message || null;
-
-  const backendData = result?.data;
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-      <h2 className="text-lg font-semibold">Deck Manager: Upload CSV</h2>
-      <p className="mt-2 text-sm text-slate-300">
-        Upload a deck CSV to the backend (
-        <span className="font-mono">POST /upload-deck</span>). After upload,
-        click <span className="font-semibold">Set as Active Deck</span>.
-      </p>
+      <h2 className="text-lg font-semibold text-white">Upload CSV Deck</h2>
 
-      {/* Upload controls */}
-      <div className="mt-4 grid gap-3">
+      <div className="mt-5 grid gap-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">
+            Custom Deck Name
+          </label>
+          <input
+            type="text"
+            placeholder="e.g. Science_Quiz"
+            value={customName}
+            onChange={(e) => setCustomName(e.target.value)}
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="mb-4 w-full">
-            <label className="block text-xs font-medium text-slate-400 mb-1">
-              Custom Deck Name
-            </label>
-            <input
-              type="text"
-              placeholder="Enter a unique name"
-              value={customName}
-              onChange={(e) => setCustomName(e.target.value)}
-              className="w-full min-w-[300px] md:min-w-[450px] rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-500"
-            />
-            <p className="mt-1 text-[10px] text-slate-500">
-              Leave blank to use the original filename.
-            </p>
-          </div>
-
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv"
             onChange={onFileChange}
-            className="block w-full text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-100 hover:file:bg-slate-700"
+            className="block w-full text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-100"
           />
 
           <button
             onClick={onUpload}
             disabled={!file || busy}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+            className="shrink-0 rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
           >
             {busy ? "Uploading..." : "Upload"}
           </button>
         </div>
-
-        {/* Optional images input (backend supports it, MVP can ignore) */}
-        <div className="rounded-lg border border-slate-800 bg-slate-950/30 p-3">
-          <div className="text-sm font-semibold">Optional Images (future)</div>
-          <p className="mt-1 text-xs text-slate-400">
-            Backend supports image upload. MVP is text-only, so this can be
-            ignored for now.
-          </p>
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            onChange={onImagesChange}
-            className="mt-2 block w-full text-xs text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-slate-100 hover:file:bg-slate-700"
-          />
-          {imageFiles.length > 0 && (
-            <div className="mt-2 text-xs text-slate-300">
-              Selected {imageFiles.length} image(s).
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* Schema + template */}
-
-      <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-        <div className="text-sm font-semibold">Required CSV Columns</div>
-        <ul className="mt-2 grid gap-1 text-sm text-slate-200 sm:grid-cols-2">
-          {REQUIRED_COLUMNS.map((c) => (
-            <li key={c} className="font-mono italic">
-              {c}
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs text-slate-400">
-            Tip: Avoid commas inside fields (such as question or answer texts).
-            If you must include commas, remember to wrap the text in "quotes".
-          </div>
-
-          <button
-            onClick={downloadTemplate}
-            className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700"
-          >
-            Download CSV Template
-          </button>
-        </div>
+      <div className="mt-3 rounded-lg border border-blue-900/40 bg-blue-950/20 p-3 text-sm text-blue-200">
+        <p>
+          <strong>🖼️ Adding Images:</strong> Upload your CSV first. Once
+          uploaded, use the <strong>Edit</strong> button in the Deck Manager to
+          manually add images to your questions.
+        </p>
       </div>
 
-      {/* Results */}
-      {result && (
+      {localError && (
+        <div className="mt-4 rounded-lg border border-rose-900/60 bg-rose-950/40 p-3 text-sm text-rose-200">
+          {localError}
+        </div>
+      )}
+
+      {result && !localError && (
         <div className="mt-4">
-          {backendStatus === "error" && (
-            <div className="rounded-lg border border-rose-900/60 bg-rose-950/40 p-3">
-              <div className="text-sm font-semibold text-rose-200">
-                Upload failed (HTTP {result.status})
-              </div>
-              <div className="mt-1 text-sm text-rose-100">
-                {backendMessage || "Backend returned an error."}
-              </div>
+          {parsed?.status === "error" ? (
+            <div className="rounded-lg border border-rose-900/60 bg-rose-950/40 p-3 text-sm text-rose-100">
+              {parsed.message}
             </div>
-          )}
-
-          {backendStatus === "success" && (
+          ) : (
             <div className="rounded-lg border border-emerald-900/60 bg-emerald-950/30 p-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-semibold text-emerald-200">
-                    Upload successful (HTTP {result.status})
+                    Upload successful!
                   </div>
-                  <div className="mt-1 text-sm text-emerald-100">
-                    Parsed {uploadedDeckPreview?.length || 0} question(s).
+                  <div className="text-xs text-emerald-100/70">
+                    Parsed {uploadedDeckPreview?.length} questions.
                   </div>
                 </div>
-
                 <button
                   onClick={setAsActiveDeck}
-                  disabled={
-                    !uploadedDeckPreview ||
-                    uploadedDeckPreview.length === 0 ||
+                  disabled={wasActivated}
+                  className={`rounded-lg px-4 py-2 text-xs font-bold transition-colors ${
                     wasActivated
-                  }
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${wasActivated
-                    ? "bg-slate-700 text-slate-400 cursor-default"
-                    : "bg-emerald-600 text-white hover:bg-emerald-500"
-                    }`}
+                      ? "bg-slate-700 text-slate-400 cursor-default"
+                      : "bg-emerald-600 text-white hover:bg-emerald-500"
+                  }`}
                 >
-                  {wasActivated ? "Active Deck Set" : "Set as Active Deck"}
+                  {wasActivated ? "Deck is Active" : "Set as Active"}
                 </button>
               </div>
             </div>
           )}
-
-          {/* Preview table (first 10 rows) */}
-          {Array.isArray(uploadedDeckPreview) &&
-            uploadedDeckPreview.length > 0 && (
-              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                <div className="text-sm font-semibold">
-                  Uploaded Deck Preview: {uploadedDeckName}
-                </div>
-                <div className="mt-2 overflow-auto">
-                  <table className="min-w-full text-left text-xs">
-                    <thead className="text-slate-300">
-                      <tr>
-                        {Object.keys(uploadedDeckPreview[0]).map((k) => (
-                          <th
-                            key={k}
-                            className="border-b border-slate-800 px-3 py-2 font-semibold"
-                          >
-                            {k}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="text-slate-200">
-                      {uploadedDeckPreview.slice(0, 10).map((row, idx) => (
-                        <tr key={idx} className="border-b border-slate-900/60">
-                          {Object.keys(uploadedDeckPreview[0]).map((k) => (
-                            <td key={k} className="px-3 py-2 align-top">
-                              {String(row[k] ?? "")}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-          {/* Raw response (debug) */}
-          <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-            <div className="text-xs text-slate-300">
-              <div className="font-semibold mb-1">Raw Backend Response</div>
-              <pre className="whitespace-pre-wrap break-words text-slate-200">
-                {typeof backendData === "string"
-                  ? backendData
-                  : JSON.stringify(backendData, null, 2)}
-              </pre>
-            </div>
-          </div>
         </div>
       )}
+
+      <div className="mt-6 flex items-center justify-between border-t border-slate-800 pt-4">
+        <span className="text-xs text-slate-500">Need the format?</span>
+        <button
+          onClick={handleDownloadTemplate}
+          className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 underline"
+        >
+          Download CSV Template
+        </button>
+      </div>
     </section>
   );
 }

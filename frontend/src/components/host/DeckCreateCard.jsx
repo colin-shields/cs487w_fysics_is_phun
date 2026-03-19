@@ -26,7 +26,12 @@ function emptyRow() {
   };
 }
 
-export default function DeckCreateCard({ onClose, initialDeck, isEditing = false }) {
+export default function DeckCreateCard({
+  onClose,
+  onSuccess,
+  initialDeck,
+  isEditing = false,
+}) {
   const { setActiveDeck } = useDeck();
 
   const [deckName, setDeckName] = useState("");
@@ -41,15 +46,20 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
   useEffect(() => {
     if (!isEditing || !initialDeck) return;
     setDeckName(initialDeck.name || "");
-    if (Array.isArray(initialDeck.questions) && initialDeck.questions.length > 0) {
-      setRows(initialDeck.questions.map((q) => ({
-        Question_Text: q.Question_Text || "",
-        Correct_Answer: q.Correct_Answer || "",
-        Predefined_Fake: q.Predefined_Fake || "",
-        Image_File: null,
-        Image_Link: q.Image_Link || "",
-        Image_Preview: "",
-      })));
+    if (
+      Array.isArray(initialDeck.questions) &&
+      initialDeck.questions.length > 0
+    ) {
+      setRows(
+        initialDeck.questions.map((q) => ({
+          Question_Text: q.Question_Text || "",
+          Correct_Answer: q.Correct_Answer || "",
+          Predefined_Fake: q.Predefined_Fake || "",
+          Image_File: null,
+          Image_Link: q.Image_Link || "",
+          Image_Preview: "",
+        })),
+      );
     }
   }, [isEditing, initialDeck]);
 
@@ -113,9 +123,12 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (!String(r.Question_Text || "").trim()) return `Row ${i + 1}: Question text is required.`;
-      if (!String(r.Correct_Answer || "").trim()) return `Row ${i + 1}: Correct answer is required.`;
-      if (!String(r.Predefined_Fake || "").trim()) return `Row ${i + 1}: Predefined fake is required.`;
+      if (!String(r.Question_Text || "").trim())
+        return `Row ${i + 1}: Question text is required.`;
+      if (!String(r.Correct_Answer || "").trim())
+        return `Row ${i + 1}: Correct answer is required.`;
+      if (!String(r.Predefined_Fake || "").trim())
+        return `Row ${i + 1}: Predefined fake is required.`;
       // image is optional, no validation
     }
     return null;
@@ -147,7 +160,9 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
           const imgRes = await uploadAsset(r.Image_File);
           if (!imgRes.ok) {
             setStatus("error");
-            setMessage(`Failed to upload image for row ${i + 1} (HTTP ${imgRes.status}).`);
+            setMessage(
+              `Failed to upload image for row ${i + 1} (HTTP ${imgRes.status}).`,
+            );
             setBusy(false);
             return;
           }
@@ -195,6 +210,12 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
       return;
     }
 
+    if (!isEditing && typeof onSuccess === "function") {
+      console.log("Manual creation success! Refreshing...");
+      onSuccess();
+      return;
+    }
+
     // Make it easy for the Host to proceed:
     // set the saved deck as Active (for session setup later)
     setActiveDeck({
@@ -210,7 +231,9 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">{isEditing ? "Edit Deck" : "Create a New Deck"}</h2>
+          <h2 className="text-lg font-semibold">
+            {isEditing ? "Edit Deck" : "Create a New Deck"}
+          </h2>
           <p className="mt-2 text-sm text-slate-300">
             Create a deck directly in the app.
           </p>
@@ -239,7 +262,9 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">
                 Question {idx + 1}{" "}
-                <span className="text-xs text-slate-400">(Question_ID = {idx + 1})</span>
+                <span className="text-xs text-slate-400">
+                  (Question_ID = {idx + 1})
+                </span>
               </div>
 
               <button
@@ -247,7 +272,11 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
                 onClick={() => removeRow(idx)}
                 disabled={rows.length <= 1}
                 className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700 disabled:opacity-50"
-                title={rows.length <= 1 ? "At least one question is required." : "Remove this question"}
+                title={
+                  rows.length <= 1
+                    ? "At least one question is required."
+                    : "Remove this question"
+                }
               >
                 Remove
               </button>
@@ -255,10 +284,14 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
 
             <div className="mt-3 grid gap-3">
               <div>
-                <label className="text-xs font-semibold text-slate-300">Question Text</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  Question Text
+                </label>
                 <textarea
                   value={r.Question_Text}
-                  onChange={(e) => setRowField(idx, "Question_Text", e.target.value)}
+                  onChange={(e) =>
+                    setRowField(idx, "Question_Text", e.target.value)
+                  }
                   rows={2}
                   placeholder="Prompt shown to students"
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-indigo-600"
@@ -267,20 +300,28 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300">Correct Answer</label>
+                  <label className="text-xs font-semibold text-slate-300">
+                    Correct Answer
+                  </label>
                   <input
                     value={r.Correct_Answer}
-                    onChange={(e) => setRowField(idx, "Correct_Answer", e.target.value)}
+                    onChange={(e) =>
+                      setRowField(idx, "Correct_Answer", e.target.value)
+                    }
                     placeholder="Correct answer"
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-indigo-600"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-300">Predefined Fake</label>
+                  <label className="text-xs font-semibold text-slate-300">
+                    Predefined Fake
+                  </label>
                   <input
                     value={r.Predefined_Fake}
-                    onChange={(e) => setRowField(idx, "Predefined_Fake", e.target.value)}
+                    onChange={(e) =>
+                      setRowField(idx, "Predefined_Fake", e.target.value)
+                    }
                     placeholder="One predefined fake answer"
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-indigo-600"
                   />
@@ -288,10 +329,17 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
               </div>
               {/* Image attachment (optional) */}
               <div className="mt-3">
-                <label className="text-xs font-semibold text-slate-300">Image (optional)</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  Image (optional)
+                </label>
                 {(r.Image_Preview || r.Image_Link) && (
                   <img
-                    src={r.Image_Preview || (r.Image_Link.startsWith("http") ? r.Image_Link : buildUrl(r.Image_Link))}
+                    src={
+                      r.Image_Preview ||
+                      (r.Image_Link.startsWith("http")
+                        ? r.Image_Link
+                        : buildUrl(r.Image_Link))
+                    }
                     alt="question"
                     className="mt-1 max-h-24 rounded"
                   />
@@ -325,7 +373,13 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
           disabled={busy}
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
         >
-          {busy ? (isEditing ? "Updating..." : "Saving...") : (isEditing ? "Update Deck" : "Save Deck")}
+          {busy
+            ? isEditing
+              ? "Updating..."
+              : "Saving..."
+            : isEditing
+              ? "Update Deck"
+              : "Save Deck"}
         </button>
 
         <div className="text-xs text-slate-400">
@@ -349,7 +403,7 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
       )}
 
       {/* Raw response (debug while integrating backend) */}
-      {raw && (
+      {/* {raw && (
         <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
           <div className="text-xs text-slate-300">
             <div className="font-semibold mb-1">Raw Backend Response</div>
@@ -358,7 +412,7 @@ export default function DeckCreateCard({ onClose, initialDeck, isEditing = false
             </pre>
           </div>
         </div>
-      )}
+      )} */}
     </div>
   );
 }

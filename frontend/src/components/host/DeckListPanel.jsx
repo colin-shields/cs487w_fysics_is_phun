@@ -44,7 +44,6 @@ function getDeckTitle(deck, idx) {
 
 export default function DeckListPanel() {
   const { setActiveDeck, activeDeck } = useDeck();
-
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [decks, setDecks] = useState([]); // array of deck detail objects
@@ -54,6 +53,11 @@ export default function DeckListPanel() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingDeck, setEditingDeck] = useState(null);
+
+  async function handleUploadSuccess() {
+    setIsUploadOpen(false); // Close the popup
+    await loadDecks(); // Refresh the list from the backend
+  }
 
   async function loadDecks() {
     setBusy(true);
@@ -252,7 +256,12 @@ export default function DeckListPanel() {
         onClose={() => setIsCreateOpen(false)}
         title="Manual Deck Creator"
       >
-        <DeckCreateCard />
+        <DeckCreateCard
+          onSuccess={async () => {
+            setIsCreateOpen(false);
+            await loadDecks();
+          }}
+        />
       </Modal>
 
       <Modal
@@ -260,7 +269,10 @@ export default function DeckListPanel() {
         onClose={() => setIsUploadOpen(false)}
         title="CSV Deck Uploader"
       >
-        <DeckUploadCard />
+        <DeckUploadCard
+          onSuccess={() => handleUploadSuccess()}
+          existingDecks={decks} // <--- PASS THE DECKS HERE
+        />
       </Modal>
 
       <Modal
