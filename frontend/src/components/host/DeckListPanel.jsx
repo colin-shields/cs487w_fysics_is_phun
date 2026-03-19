@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { getHostCode } from "../../utils/hostAuth.js";
+import { getHostCode, logoutHost } from "../../utils/hostAuth.js";
 import {
   listDecksApi,
   getDeckDetailApi,
@@ -59,51 +59,60 @@ export default function DeckListPanel() {
     setBusy(true);
     setError("");
 
-    const res = await listDecksApi();
+    try {
+      const res = await listDecksApi();
 
-    if (!res.ok) {
-      // If the server rejects the code saved in localStorage
-      if (res.status === 401 || res.status === 403) {
-        logoutHost();
+      // If the request never even reached the server (status 0)
+      if (!res || res.status === 0) {
+        setError("Cannot reach the server. Is the backend running?");
+        setBusy(false);
         return;
       }
-      setError(`Failed to load: ${res.status}`);
-      setBusy(false);
-      return;
-    }
 
-    // Expected: list of filenames OR {decks:[...]}
-    const payload = res.data;
-    const filenames = Array.isArray(payload) ? payload : payload?.decks;
-
-    if (!Array.isArray(filenames)) {
-      setError("Unexpected response format from server.");
-      setBusy(false);
-      return;
-    }
-
-    // Fetch details for each filename in parallel
-    const detailedDecks = await Promise.all(
-      filenames.map(async (filename) => {
-        const detailRes = await getDeckDetailApi(filename);
-        if (!detailRes.ok) {
-          return {
-            deck_id: filename,
-            questions: { status: "error", data: [] },
-          };
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          logoutHost();
+          return;
         }
-        return detailRes.data;
-      }),
-    );
+        setError(`Failed to load: ${res.status}`);
+        setBusy(false);
+        return;
+      }
 
-    setDecks(detailedDecks);
-    if (detailedDecks.length > 0) setSelectedDeck(detailedDecks[0]);
-    setBusy(false);
+      const payload = res.data;
+      const filenames = Array.isArray(payload) ? payload : payload?.decks;
+
+      if (!Array.isArray(filenames)) {
+        setError("Unexpected response format from server.");
+        setBusy(false);
+        return;
+      }
+
+      const detailedDecks = await Promise.all(
+        filenames.map(async (filename) => {
+          const detailRes = await getDeckDetailApi(filename);
+          if (!detailRes.ok) {
+            return {
+              deck_id: filename,
+              questions: { status: "error", data: [] },
+            };
+          }
+          return detailRes.data;
+        }),
+      );
+
+      setDecks(detailedDecks);
+      if (detailedDecks.length > 0) setSelectedDeck(detailedDecks[0]);
+      setBusy(false);
+    } catch (err) {
+      console.error("Deck loading error:", err);
+      setError("A network error occurred. Please check your connection.");
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
     loadDecks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function onSelectDeck(deck) {

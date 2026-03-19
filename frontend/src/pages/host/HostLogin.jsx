@@ -19,7 +19,6 @@ export default function HostLogin() {
       return;
     }
 
-
     setBusy(true);
     const res = await verifyHostCode(codeClean);
     setBusy(false);
@@ -33,8 +32,6 @@ export default function HostLogin() {
     setHostCode(codeClean);
     navigate("/host", { replace: true });
   }
-
-
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-[#0a0523] to-[#0d011c] flex items-center justify-center px-4 relative overflow-hidden">
@@ -55,8 +52,12 @@ export default function HostLogin() {
         {/* Subtle top border glow */}
         <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-purple-500 to-transparent opacity-50"></div>
 
-        <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-2">Host View</div>
-        <h1 className="text-3xl font-bold text-white tracking-wide">Host Login</h1>
+        <div className="text-xs font-semibold uppercase tracking-widest text-indigo-300/70 mb-2">
+          Host View
+        </div>
+        <h1 className="text-3xl font-bold text-white tracking-wide">
+          Host Login
+        </h1>
         <p className="mt-2 text-sm text-indigo-200/80">
           Enter the Host Code to access Host pages.
         </p>
@@ -89,9 +90,9 @@ export default function HostLogin() {
             {busy ? "Authenticating..." : "Continue"}
           </button>
 
-          <p className="text-xs text-center text-indigo-300/50 mt-4 leading-relaxed">
+          {/* <p className="text-xs text-center text-indigo-300/50 mt-4 leading-relaxed">
             If the code is wrong, protected actions will return 401 until corrected.
-          </p>
+          </p> */}
         </form>
       </div>
     </div>

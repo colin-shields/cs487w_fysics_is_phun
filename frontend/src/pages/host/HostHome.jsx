@@ -1,32 +1,26 @@
 import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getHostCode, clearHostCode } from "../../utils/hostAuth";
+import {
+  getHostCode,
+  clearHostCode,
+  getExpectedCode,
+} from "../../utils/hostAuth";
 import ActiveDeckCard from "../../components/host/ActiveDeckCard.jsx";
 
 export default function HostHome() {
   const navigate = useNavigate();
   const hostCode = getHostCode();
+  const expectedCode = getExpectedCode();
 
   // 1. HARD GUARD & SECURITY CHECK
   useEffect(() => {
-    // Determine the "Truth" based on where we are running
-    const isVercel = window.location.hostname.includes("vercel.app");
-    const expectedCode = isVercel ? "FiP_2026" : "default_code";
-
-    if (!hostCode) {
-      // No code at all? Go to login.
-      window.location.href = "/host?reason=expired";
-      return;
-    }
-
-    if (hostCode !== expectedCode) {
-      // WRONG code for this environment? Wipe it and force login.
-      console.warn("Invalid host code detected for this environment.");
+    // If code is missing OR doesn't match the environment's truth
+    if (!hostCode || hostCode !== expectedCode) {
+      console.warn("Unauthorized access attempt. Redirecting...");
       clearHostCode();
       window.location.href = "/host?reason=expired";
     }
-  }, [hostCode]);
-
+  }, [hostCode, expectedCode]);
   // 2. NAVIGATION HELPERS
   function navigateToDeckManager() {
     navigate("/host/decks");
@@ -37,10 +31,6 @@ export default function HostHome() {
   }
 
   // 3. RENDER PREVENTER
-  // If the code is missing or wrong, we return null to keep the screen blank
-  // until the useEffect above kicks us out.
-  const isVercel = window.location.hostname.includes("vercel.app");
-  const expectedCode = isVercel ? "FiP_2026" : "default_code";
   if (!hostCode || hostCode !== expectedCode) return null;
 
   return (
