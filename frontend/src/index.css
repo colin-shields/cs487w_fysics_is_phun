@@ -1,15 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  /* Core Brand Colors */
   --color-indigo-950: #1e1b4b;
   --color-indigo-900: #312e81;
   --color-indigo-600: #4f46e5;
   --color-indigo-500: #6366f1;
   --color-indigo-300: #a5b4fc;
-
   --color-purple-600: #9333ea;
-
   --color-emerald-600: #059669;
   --color-teal-500: #14b8a6;
 
@@ -17,38 +14,38 @@
   --animate-jury-fade-up: juryFadeUp 500ms ease-out both;
   --animate-jury-glow-pulse: juryGlowPulse 1.8s ease-in-out infinite;
   --animate-courtroom-drift: courtroomDrift 16s ease-in-out infinite;
+}
 
-  @keyframes juryFadeUp {
-    from {
-      opacity: 0;
-      transform: translateY(14px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+@keyframes juryFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
   }
-
-  @keyframes juryGlowPulse {
-    0%,
-    100% {
-      box-shadow: 0 0 0 rgba(139, 92, 246, 0);
-    }
-    50% {
-      box-shadow: 0 0 22px rgba(139, 92, 246, 0.35);
-    }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
+}
 
-  @keyframes courtroomDrift {
-    0% {
-      transform: scale(1.05) translateY(0) translateX(0);
-    }
-    50% {
-      transform: scale(1.08) translateY(-6px) translateX(-4px);
-    }
-    100% {
-      transform: scale(1.05) translateY(0) translateX(0);
-    }
+@keyframes juryGlowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(139, 92, 246, 0);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(139, 92, 246, 0.35);
+  }
+}
+
+@keyframes courtroomDrift {
+  0% {
+    transform: scale(1.05) translateY(0) translateX(0);
+  }
+  50% {
+    transform: scale(1.08) translateY(-6px) translateX(-4px);
+  }
+  100% {
+    transform: scale(1.05) translateY(0) translateX(0);
   }
 }
 
@@ -56,24 +53,12 @@
   color-scheme: dark;
 }
 
-/* Helper Classes for specialized animations */
 .jury-fade-up {
   animation: var(--animate-jury-fade-up);
 }
-
 .jury-seat-filled {
   animation: var(--animate-jury-glow-pulse);
 }
-
 .courtroom-drift {
   animation: var(--animate-courtroom-drift);
-  transform-origin: center;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .jury-fade-up,
-  .jury-seat-filled,
-  .courtroom-drift {
-    animation: none !important;
-  }
 }
