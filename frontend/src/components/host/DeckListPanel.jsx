@@ -58,21 +58,16 @@ export default function DeckListPanel() {
   async function loadDecks() {
     setBusy(true);
     setError("");
-    setDecks([]);
-    setSelectedDeck(null);
 
     const res = await listDecksApi();
 
     if (!res.ok) {
-      if ([404, 405, 501].includes(res.status)) {
-        setError(
-          "Deck listing is not available yet (server endpoint /decks not implemented).",
-        );
-      } else if (res.status === 401 || res.status === 403) {
-        setError("Not authorized. Please log in again with the host code.");
-      } else {
-        setError(`Failed to load decks (HTTP ${res.status}).`);
+      // If the server rejects the code saved in localStorage
+      if (res.status === 401 || res.status === 403) {
+        logoutHost();
+        return;
       }
+      setError(`Failed to load: ${res.status}`);
       setBusy(false);
       return;
     }
@@ -82,9 +77,7 @@ export default function DeckListPanel() {
     const filenames = Array.isArray(payload) ? payload : payload?.decks;
 
     if (!Array.isArray(filenames)) {
-      setError(
-        "Unexpected response format from server (expected a list of filenames).",
-      );
+      setError("Unexpected response format from server.");
       setBusy(false);
       return;
     }
@@ -93,28 +86,18 @@ export default function DeckListPanel() {
     const detailedDecks = await Promise.all(
       filenames.map(async (filename) => {
         const detailRes = await getDeckDetailApi(filename);
-
         if (!detailRes.ok) {
-          // Fallback so the UI doesn't crash
           return {
             deck_id: filename,
             questions: { status: "error", data: [] },
           };
         }
-
-        // Expected detail shape:
-        // { deck_id: filename, questions: { status:"success", data:[...] } }
         return detailRes.data;
       }),
     );
 
     setDecks(detailedDecks);
-
-    // Auto-select the first deck, if any
-    if (detailedDecks.length > 0) {
-      setSelectedDeck(detailedDecks[0]);
-    }
-
+    if (detailedDecks.length > 0) setSelectedDeck(detailedDecks[0]);
     setBusy(false);
   }
 
@@ -179,8 +162,6 @@ export default function DeckListPanel() {
     if (saved) await loadDecks();
   }
 
-
-
   async function onDownloadBackup(deck) {
     if (!deck?.deck_id) return;
 
@@ -200,7 +181,6 @@ export default function DeckListPanel() {
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);
       }
-
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -320,8 +300,9 @@ export default function DeckListPanel() {
               return (
                 <div
                   key={deck?.deck_id || idx}
-                  className={`rounded-lg border bg-slate-950/30 p-4 ${isSelected ? "border-indigo-500" : "border-slate-800"
-                    }`}
+                  className={`rounded-lg border bg-slate-950/30 p-4 ${
+                    isSelected ? "border-indigo-500" : "border-slate-800"
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <button
@@ -342,10 +323,11 @@ export default function DeckListPanel() {
                         onClick={() => onSetActive(deck)}
                         disabled={activeDeck?.deckId === deck?.deck_id || busy}
                         className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors
-    ${activeDeck?.deckId === deck?.deck_id
-                            ? "bg-emerald-600 text-white cursor-default" // Active is now Green
-                            : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
-                          }`}
+    ${
+      activeDeck?.deckId === deck?.deck_id
+        ? "bg-emerald-600 text-white cursor-default" // Active is now Green
+        : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
+    }`}
                         title={
                           activeDeck?.deckId === deck?.deck_id
                             ? "This is the current active deck"
@@ -353,7 +335,7 @@ export default function DeckListPanel() {
                         }
                       >
                         {activeDeck?.deckId === deck?.deck_id
-                          ? "Active"
+                          ? "(Active)"
                           : "Set Active"}
                       </button>
 
@@ -382,7 +364,7 @@ export default function DeckListPanel() {
                       <button
                         onClick={() => onEditDeck(deck)}
                         disabled={busy}
-                        className="rounded-lg bg-amber-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                        className="rounded-lg bg-indigo-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
                         title="Edit this deck"
                       >
                         Edit

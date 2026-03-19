@@ -16,5 +16,11 @@ export function clearHostCode() {
 }
 
 export function isHostLoggedIn() {
-  return Boolean(getHostCode());
+  const code = getHostCode();
+  return !!code && code.length > 0;
+}
+
+export function logoutHost() {
+  localStorage.removeItem(HOST_CODE_KEY);
+  window.location.href = "/host?reason=expired";
 }

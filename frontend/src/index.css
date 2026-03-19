@@ -1,7 +1,9 @@
 /* frontend/src/index.css
    Tailwind base layers + minimal global defaults.
 */
+
 @import "tailwindcss";
+@config "../tailwind.config.cjs";
 
 :root {
   color-scheme: dark;

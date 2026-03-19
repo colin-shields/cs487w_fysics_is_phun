@@ -47,7 +47,8 @@ export default function PlayerGame() {
   const [myRoundBreakdown, setMyRoundBreakdown] = useState(null);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
 
-  const syncedAvatarUrl = playerAvatarUrl || sessionStatus?.player_avatars?.[playerName] || "";
+  const syncedAvatarUrl =
+    playerAvatarUrl || sessionStatus?.player_avatars?.[playerName] || "";
   const resolvedAvatarUrl = getImageUrl(syncedAvatarUrl);
   const showPlayerAvatar = !!resolvedAvatarUrl && !avatarLoadError;
 
@@ -99,7 +100,10 @@ export default function PlayerGame() {
         if (msg.type === "question") {
           setCurrentQuestionIndex(msg.index);
           setCurrentQuestion(msg.question);
-          setSessionStatus((prev) => ({ ...(prev || {}), status: "in-progress" }));
+          setSessionStatus((prev) => ({
+            ...(prev || {}),
+            status: "in-progress",
+          }));
           setPhase("submit");
           setMyFake("");
           setAnswers([]);
@@ -135,7 +139,10 @@ export default function PlayerGame() {
     ws.onerror = (e) => console.error("Player ws error", e);
 
     return () => {
-      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, [roomCode, sessionCancelled]);
 
@@ -153,8 +160,12 @@ export default function PlayerGame() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-[#0a0523] to-[#0d011c] flex items-center justify-center p-6">
         <div className="rounded-2xl border border-pink-500/30 bg-pink-950/20 backdrop-blur-md p-8 max-w-md text-center w-full">
-          <h2 className="text-2xl font-bold text-white mb-2 tracking-wide">Session Cancelled</h2>
-          <p className="text-sm text-pink-200/70 mb-8">The host has cancelled the game session.</p>
+          <h2 className="text-2xl font-bold text-white mb-2 tracking-wide">
+            Session Cancelled
+          </h2>
+          <p className="text-sm text-pink-200/70 mb-8">
+            The host has cancelled the game session.
+          </p>
           <button
             onClick={() => navigate("/join")}
             className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 text-base font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] transition-all"
@@ -171,14 +182,22 @@ export default function PlayerGame() {
       <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-[#0a0523] to-[#0d011c] flex items-center justify-center p-6">
         <div className="rounded-2xl border border-purple-500/30 bg-purple-950/20 backdrop-blur-md p-8 max-w-md text-center w-full">
           <div className="text-5xl mb-4">🎉</div>
-          <h2 className="text-2xl font-bold text-white mb-2 tracking-wide">Game Finished!</h2>
+          <h2 className="text-2xl font-bold text-white mb-2 tracking-wide">
+            Game Finished!
+          </h2>
           {myTotalScore !== null && (
             <div className="my-4 px-6 py-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 inline-block">
-              <div className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">Your Final Score</div>
-              <div className="text-3xl font-black text-white">{Math.round((myTotalScore ?? 0) * 100) / 100} pts</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                Your Final Score
+              </div>
+              <div className="text-3xl font-black text-white">
+                {Math.round((myTotalScore ?? 0) * 100) / 100} pts
+              </div>
             </div>
           )}
-          <p className="text-sm text-purple-200/80 mb-8 mt-4">Thank you for playing!</p>
+          <p className="text-sm text-purple-200/80 mb-8 mt-4">
+            Thank you for playing!
+          </p>
           <button
             onClick={() => navigate("/join")}
             className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 text-base font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] transition-all"
@@ -191,12 +210,17 @@ export default function PlayerGame() {
   }
 
   // Running score corner badge — shown once we have a score
-  const scoreBadge = myTotalScore !== null ? (
-    <div className="fixed bottom-4 right-4 z-50 px-4 py-2 rounded-full bg-[#0a0523]/90 border border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.2)] backdrop-blur-sm">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/80 mb-0.5">Total</div>
-      <div className="text-lg font-black text-white leading-none">{Math.round((myTotalScore ?? 0) * 100) / 100} pts</div>
-    </div>
-  ) : null;
+  const scoreBadge =
+    myTotalScore !== null ? (
+      <div className="fixed bottom-4 right-4 z-50 px-4 py-2 rounded-full bg-[#0a0523]/90 border border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.2)] backdrop-blur-sm">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/80 mb-0.5">
+          Total
+        </div>
+        <div className="text-lg font-black text-white leading-none">
+          {Math.round((myTotalScore ?? 0) * 100) / 100} pts
+        </div>
+      </div>
+    ) : null;
 
   if (currentQuestion) {
     return (
@@ -206,12 +230,20 @@ export default function PlayerGame() {
           <div className="mx-auto max-w-2xl px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">Room Code</div>
-                <div className="text-2xl font-bold text-purple-400 drop-shadow-[0_0_5px_rgba(168,85,247,0.4)]">{roomCode}</div>
+                <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">
+                  Room Code
+                </div>
+                <div className="text-2xl font-bold text-purple-400 drop-shadow-[0_0_5px_rgba(168,85,247,0.4)]">
+                  {roomCode}
+                </div>
               </div>
               <div className="text-right">
-                <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">Your Name</div>
-                <div className="text-lg font-semibold text-white">{playerName}</div>
+                <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">
+                  Your Name
+                </div>
+                <div className="text-lg font-semibold text-white">
+                  {playerName}
+                </div>
               </div>
             </div>
           </div>
@@ -227,14 +259,18 @@ export default function PlayerGame() {
                 </span>
                 <span className="capitalize">{sessionStatus.status}</span>
               </div>
-              <div className="font-semibold">{sessionStatus.players.length} Players</div>
+              <div className="font-semibold">
+                {sessionStatus.players.length} Players
+              </div>
             </div>
           )}
 
           <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_30px_rgba(139,92,246,0.1)] p-8 text-center relative overflow-hidden">
             <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-purple-500 to-transparent opacity-50"></div>
 
-            <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold mb-3">Question {currentQuestionIndex + 1}</div>
+            <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold mb-3">
+              Question {currentQuestionIndex + 1}
+            </div>
             <h2 className="text-3xl font-bold text-white mb-6 leading-tight">
               {currentQuestion.Question_Text}
             </h2>
@@ -261,8 +297,17 @@ export default function PlayerGame() {
                 <button
                   onClick={() => {
                     if (!myFake) return;
-                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                      wsRef.current.send(JSON.stringify({ type: "fake", player: playerName, text: myFake }));
+                    if (
+                      wsRef.current &&
+                      wsRef.current.readyState === WebSocket.OPEN
+                    ) {
+                      wsRef.current.send(
+                        JSON.stringify({
+                          type: "fake",
+                          player: playerName,
+                          text: myFake,
+                        }),
+                      );
                     }
                     setPhase("waiting");
                   }}
@@ -275,11 +320,14 @@ export default function PlayerGame() {
             )}
 
             {/* Waiting phase */}
-            {(phase === "waiting") && (
+            {phase === "waiting" && (
               <div className="mt-10 mb-4 flex flex-col items-center justify-center space-y-4">
                 <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-purple-500 rounded-full animate-spin"></div>
                 <div className="text-indigo-200 font-semibold tracking-wide">
-                  Waiting for others<span className="inline-block w-8 text-left">{waitingDots}</span>
+                  Waiting for others
+                  <span className="inline-block w-8 text-left">
+                    {waitingDots}
+                  </span>
                 </div>
               </div>
             )}
@@ -288,8 +336,12 @@ export default function PlayerGame() {
             {phase === "juryWaiting" && (
               <div className="mt-10 mb-4 flex flex-col items-center justify-center space-y-4">
                 <div className="text-3xl mb-2">⚖</div>
-                <div className="text-amber-200 font-bold tracking-wide text-lg">Jury is deliberating{waitingDots}</div>
-                <div className="text-sm text-indigo-300/60">Hang tight while the jury makes their selection</div>
+                <div className="text-amber-200 font-bold tracking-wide text-lg">
+                  Jury is deliberating{waitingDots}
+                </div>
+                <div className="text-sm text-indigo-300/60">
+                  Hang tight while the jury makes their selection
+                </div>
               </div>
             )}
 
@@ -301,8 +353,17 @@ export default function PlayerGame() {
                     key={idx}
                     onClick={() => {
                       setMyChoice(ans);
-                      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                        wsRef.current.send(JSON.stringify({ type: "choice", player: playerName, answer: ans }));
+                      if (
+                        wsRef.current &&
+                        wsRef.current.readyState === WebSocket.OPEN
+                      ) {
+                        wsRef.current.send(
+                          JSON.stringify({
+                            type: "choice",
+                            player: playerName,
+                            answer: ans,
+                          }),
+                        );
                       }
                     }}
                     disabled={!!myChoice}
@@ -314,7 +375,9 @@ export default function PlayerGame() {
                 {myChoice && (
                   <div className="mt-4 flex flex-col items-center justify-center space-y-3">
                     <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-purple-500 rounded-full animate-spin"></div>
-                    <div className="text-sm text-indigo-300 font-medium">Waiting for results{waitingDots}</div>
+                    <div className="text-sm text-indigo-300 font-medium">
+                      Waiting for results{waitingDots}
+                    </div>
                   </div>
                 )}
               </div>
@@ -328,50 +391,82 @@ export default function PlayerGame() {
                   <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 p-5 flex items-center gap-4 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
                     <div className="text-3xl shrink-0">✓</div>
                     <div>
-                      <div className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">Correct!</div>
-                      <div className="text-lg font-bold text-white">{correctAnswer}</div>
+                      <div className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                        Correct!
+                      </div>
+                      <div className="text-lg font-bold text-white">
+                        {correctAnswer}
+                      </div>
                     </div>
                   </div>
                 ) : (
                   <div className="rounded-xl border border-pink-500/40 bg-pink-950/30 p-5 shadow-[0_0_15px_rgba(236,72,153,0.1)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-pink-400 mb-2">Incorrect</div>
-                    <div className="text-sm text-pink-200/80 mb-2">You chose: <span className="font-bold text-white">{myChoice}</span></div>
-                    <div className="text-sm text-emerald-300/80">Correct answer: <span className="font-bold text-emerald-300">{correctAnswer}</span></div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-pink-400 mb-2">
+                      Incorrect
+                    </div>
+                    <div className="text-sm text-pink-200/80 mb-2">
+                      You chose:{" "}
+                      <span className="font-bold text-white">{myChoice}</span>
+                    </div>
+                    <div className="text-sm text-emerald-300/80">
+                      Correct answer:{" "}
+                      <span className="font-bold text-emerald-300">
+                        {correctAnswer}
+                      </span>
+                    </div>
                   </div>
                 )}
 
                 {/* Round breakdown — appears after round_scores arrives */}
                 {myRoundBreakdown && (
                   <div className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-5">
-                    <div className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3">This Round</div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3">
+                      This Round
+                    </div>
                     <div className="space-y-2">
                       {myRoundBreakdown.correct_pts >= 0 && (
                         <div className="flex justify-between text-sm">
                           <span className="text-indigo-200">Correct guess</span>
-                          <span className="font-bold text-emerald-400">{fmtPts(myRoundBreakdown.correct_pts) || 0}</span>
+                          <span className="font-bold text-emerald-400">
+                            {fmtPts(myRoundBreakdown.correct_pts) || 0}
+                          </span>
                         </div>
                       )}
                       {myRoundBreakdown.fool_pts >= 0 && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-indigo-200">Players fooled by your fake</span>
-                          <span className="font-bold text-indigo-300">{fmtPts(myRoundBreakdown.fool_pts) || 0}</span>
+                          <span className="text-indigo-200">
+                            Players fooled by your fake
+                          </span>
+                          <span className="font-bold text-indigo-300">
+                            {fmtPts(myRoundBreakdown.fool_pts) || 0}
+                          </span>
                         </div>
                       )}
                       {myRoundBreakdown.jury_best_pts >= 0 && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-indigo-200">Jury best fake</span>
-                          <span className="font-bold text-amber-400">{fmtPts(myRoundBreakdown.jury_best_pts) || 0}</span>
+                          <span className="text-indigo-200">
+                            Jury best fake
+                          </span>
+                          <span className="font-bold text-amber-400">
+                            {fmtPts(myRoundBreakdown.jury_best_pts) || 0}
+                          </span>
                         </div>
                       )}
                       {myRoundBreakdown.jury_worst_pts >= 0 && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-indigo-200">Jury worst fake penalty</span>
-                          <span className="font-bold text-pink-400">{fmtPts(-myRoundBreakdown.jury_worst_pts) || 0}</span>
+                          <span className="text-indigo-200">
+                            Jury worst fake penalty
+                          </span>
+                          <span className="font-bold text-pink-400">
+                            {fmtPts(-myRoundBreakdown.jury_worst_pts) || 0}
+                          </span>
                         </div>
                       )}
                       <div className="pt-2 border-t border-indigo-500/20 flex justify-between text-sm font-bold">
                         <span className="text-white">Round total</span>
-                        <span className={`${(myRoundBreakdown.round_total ?? 0) >= 0 ? "text-emerald-400" : "text-pink-400"}`}>
+                        <span
+                          className={`${(myRoundBreakdown.round_total ?? 0) >= 0 ? "text-emerald-400" : "text-pink-400"}`}
+                        >
                           {fmtPts(myRoundBreakdown.round_total) || 0}
                         </span>
                       </div>
@@ -383,7 +478,9 @@ export default function PlayerGame() {
                 {!myRoundBreakdown && (
                   <div className="flex items-center justify-center gap-3 py-4">
                     <div className="w-5 h-5 border-2 border-indigo-500/30 border-t-purple-500 rounded-full animate-spin"></div>
-                    <div className="text-sm text-indigo-300/60">Waiting for jury{waitingDots}</div>
+                    <div className="text-sm text-indigo-300/60">
+                      Waiting for jury{waitingDots}
+                    </div>
                   </div>
                 )}
               </div>
@@ -402,8 +499,12 @@ export default function PlayerGame() {
         <div className="mx-auto max-w-2xl px-6 py-4">
           <div className="grid grid-cols-3 items-center">
             <div>
-              <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">Room Code</div>
-              <div className="text-2xl font-bold text-purple-400 drop-shadow-[0_0_5px_rgba(168,85,247,0.4)]">{roomCode}</div>
+              <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">
+                Room Code
+              </div>
+              <div className="text-2xl font-bold text-purple-400 drop-shadow-[0_0_5px_rgba(168,85,247,0.4)]">
+                {roomCode}
+              </div>
             </div>
             <div className="flex justify-center">
               <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
@@ -422,8 +523,12 @@ export default function PlayerGame() {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">Your Name</div>
-              <div className="text-lg font-semibold text-white">{playerName}</div>
+              <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">
+                Your Name
+              </div>
+              <div className="text-lg font-semibold text-white">
+                {playerName}
+              </div>
             </div>
           </div>
         </div>
@@ -431,7 +536,9 @@ export default function PlayerGame() {
 
       <main className="mx-auto max-w-2xl px-6 py-10">
         {error && (
-          <div className="mb-6 rounded-lg border border-pink-500/40 bg-pink-950/40 p-4 text-sm text-pink-200">{error}</div>
+          <div className="mb-6 rounded-lg border border-pink-500/40 bg-pink-950/40 p-4 text-sm text-pink-200">
+            {error}
+          </div>
         )}
 
         <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_30px_rgba(139,92,246,0.1)] p-12 text-center relative overflow-hidden">
@@ -440,20 +547,25 @@ export default function PlayerGame() {
           <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-purple-500 rounded-full animate-spin mx-auto mb-6"></div>
 
           <h2 className="text-3xl font-bold text-white mb-2 tracking-wide">
-            Waiting for host<span className="inline-block w-6 text-left">{waitingDots}</span>
+            Waiting for host
+            <span className="inline-block w-6 text-left">{waitingDots}</span>
           </h2>
-          <div className="text-sm text-indigo-200/70 uppercase tracking-widest font-semibold">Questions Coming Soon</div>
+          <div className="text-sm text-indigo-200/70 uppercase tracking-widest font-semibold">
+            Questions Coming Soon
+          </div>
 
-          {sessionStatus && (
+          {/* {sessionStatus && (
             <div className="mt-8 rounded-xl bg-indigo-950/30 border border-indigo-500/20 p-4 text-sm text-indigo-200 flex justify-between items-center w-full max-w-xs mx-auto">
               <span className="capitalize">{sessionStatus.status}</span>
               <div className="font-semibold text-white">{sessionStatus.players.length} Players</div>
             </div>
-          )}
+          )} */}
 
           <div className="mt-8 pt-6 border-t border-indigo-500/10">
             <div className="inline-block">
-              <div className="text-xs text-indigo-400/60 uppercase tracking-wider font-semibold mb-2">Connection</div>
+              {/* <div className="text-xs text-indigo-400/60 uppercase tracking-wider font-semibold mb-2">
+                Connection
+              </div> */}
               <div className="flex items-center justify-center gap-2">
                 <span className="relative flex h-3 w-3">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>

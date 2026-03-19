@@ -29,7 +29,9 @@ export default function HostLobby() {
       const hostCode = getHostCode?.() || "";
       const headers = hostCode ? { "X-Host-Code": hostCode } : {};
       try {
-        const res = await fetch(buildUrl(`/session-status/${roomCode}`), { headers });
+        const res = await fetch(buildUrl(`/session-status/${roomCode}`), {
+          headers,
+        });
         if (res.ok) {
           const data = await res.json();
           setPlayers(data.players || []);
@@ -63,28 +65,53 @@ export default function HostLobby() {
   if (!roomCode) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-slate-300">No session information. Go back to setup.</div>
+        <div className="text-slate-300">
+          No session information. Go back to setup.
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#050114] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950 via-[#0a0523] to-[#050114]">
-      <header className="sticky top-0 z-40 border-b border-indigo-500/20 bg-[#0a0523]/80 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+      <header className="sticky top-0 z-40 border-b border-indigo-900/50 bg-[#0a0523]/80 backdrop-blur shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">Host View</div>
-            <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">
-              Session Lobby
+          {/* 1. Branding (Matches other host pages) */}
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 shadow-[0_0_15px_rgba(139,92,246,0.4)] text-white">
+              <span className="font-bold text-lg">Φ</span>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-indigo-300">
+                Lobby View
+              </div>
+              <div className="text-lg font-bold text-white tracking-wide">
+                Room: {roomCode}
+              </div>
             </div>
           </div>
-          <button
-            onClick={onBackClick}
-            disabled={cancelling}
-            className="text-sm font-semibold text-indigo-300 hover:text-white underline underline-offset-4 disabled:opacity-50 transition-colors"
-          >
-            {cancelling ? "Cancelling..." : "Back to Setup"}
-          </button>
+
+          {/* 2. Uniform Button Group (Aligned Right) */}
+          <div className="flex items-center gap-6">
+            <button
+              onClick={() => window.open("/join", "_blank")}
+              className="text-sm font-semibold uppercase tracking-wider text-indigo-300 hover:text-white transition-colors"
+            >
+              Player Join Page ↗
+            </button>
+            <button
+              onClick={() => window.open("/jury", "_blank")}
+              className="text-sm font-semibold uppercase tracking-wider text-indigo-300 hover:text-white transition-colors"
+            >
+              Jury Join Page ↗
+            </button>
+            <button
+              onClick={() => navigate("/host")}
+              className="text-sm font-semibold uppercase tracking-wider text-indigo-300 hover:text-white transition-colors"
+            >
+              Return to Home
+            </button>
+          </div>
         </div>
       </header>
 
@@ -93,7 +120,9 @@ export default function HostLobby() {
           {/* Subtle pulse effect */}
           <div className="absolute inset-0 bg-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
 
-          <h2 className="text-xs font-bold uppercase tracking-widest text-indigo-300/80 mb-4">Room Code</h2>
+          <h2 className="text-xs font-bold uppercase tracking-widest text-indigo-300/80 mb-4">
+            Room Code
+          </h2>
           <div className="inline-block px-10 py-5 rounded-2xl bg-[#0a0523]/60 border border-indigo-500/40 shadow-inner">
             <div className="text-6xl sm:text-7xl font-black text-emerald-400 tracking-[0.2em] font-mono drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]">
               {roomCode}
@@ -121,24 +150,49 @@ export default function HostLobby() {
           <div className="min-h-[150px]">
             {players.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-indigo-300/60 font-medium py-10">
-                <svg className="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-500/50 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <svg
+                  className="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-500/50 mb-4"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
                 </svg>
                 Waiting for players to join...
               </div>
             ) : (
               <ul className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {players.map((n, i) => (
-                  <li key={i} className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-4 py-3 text-indigo-100 font-medium flex items-center gap-3 shadow-inner">
+                  <li
+                    key={i}
+                    className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-4 py-3 text-indigo-100 font-medium flex items-center gap-3 shadow-inner"
+                  >
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
                       <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center text-white text-xs font-bold">
-                        {getAvatarUrl(playerAvatars[n]) && !avatarLoadErrors[n] ? (
+                        {getAvatarUrl(playerAvatars[n]) &&
+                        !avatarLoadErrors[n] ? (
                           <img
                             src={getAvatarUrl(playerAvatars[n])}
                             alt={`${n} avatar`}
                             className="h-full w-full object-cover"
-                            onError={() => setAvatarLoadErrors((prev) => ({ ...prev, [n]: true }))}
+                            onError={() =>
+                              setAvatarLoadErrors((prev) => ({
+                                ...prev,
+                                [n]: true,
+                              }))
+                            }
                           />
                         ) : (
                           n.charAt(0).toUpperCase()
@@ -164,11 +218,16 @@ export default function HostLobby() {
             </span>
           </div>
           {jurors.length === 0 ? (
-            <p className="text-sm text-indigo-300/60 text-center py-4">No jurors joined yet — at least 1 required to start</p>
+            <p className="text-sm text-indigo-300/60 text-center py-4">
+              No jurors joined yet — at least 1 required to start
+            </p>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {jurors.map((n, i) => (
-                <li key={i} className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-3 py-2 text-indigo-100 text-sm font-medium flex items-center gap-2 shadow-inner">
+                <li
+                  key={i}
+                  className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-3 py-2 text-indigo-100 text-sm font-medium flex items-center gap-2 shadow-inner"
+                >
                   <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
                     {n.charAt(0).toUpperCase()}
                   </div>
@@ -187,12 +246,23 @@ export default function HostLobby() {
               className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all flex items-center justify-center gap-2"
             >
               Start Game
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
+                  clipRule="evenodd"
+                />
               </svg>
             </button>
             {jurors.length === 0 && (
-              <p className="text-center text-xs font-medium text-amber-400/80">At least 1 juror must join before starting</p>
+              <p className="text-center text-xs font-medium text-amber-400/80">
+                At least 1 juror must join before starting
+              </p>
             )}
           </div>
           <button
@@ -206,8 +276,17 @@ export default function HostLobby() {
 
         {error && (
           <div className="rounded-xl border border-pink-500/40 bg-pink-950/40 p-4 text-sm font-medium text-pink-200 shadow-[0_0_15px_rgba(236,72,153,0.1)] flex items-center gap-3">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 shrink-0"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clipRule="evenodd"
+              />
             </svg>
             {error}
           </div>
