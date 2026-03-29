@@ -19,7 +19,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { buildWsUrl } from "../../api/httpClient";
+import { buildWsUrl, httpGet } from "../../api/httpClient";
 
 export default function JuryVote() {
   const location = useLocation();
@@ -42,11 +42,14 @@ export default function JuryVote() {
 
   const [correctAnswer, setCorrectAnswer] = useState(null);
   const [scoreSnapshot, setScoreSnapshot] = useState(null); // optional
+  const [playerAvatars, setPlayerAvatars] = useState({});
 
   // Vote state
   const [bestSelectedPlayer, setBestSelectedPlayer] = useState(null);
   const [worstSelectedPlayer, setWorstSelectedPlayer] = useState(null);
   const [submitStatus, setSubmitStatus] = useState("");
+  const [revealBestIdentity, setRevealBestIdentity] = useState(false);
+  const [revealWorstIdentity, setRevealWorstIdentity] = useState(false);
 
   // animated dots (small UX improvement)
   const [waitingDotCount, setWaitingDotCount] = useState(1);
@@ -58,12 +61,24 @@ export default function JuryVote() {
   }, []);
   const waitingDots = useMemo(() => [".", "..", "..."][waitingDotCount - 1], [waitingDotCount]);
 
+  async function refreshPlayerAvatars(code) {
+    const res = await httpGet(`/session-status/${String(code || "").toUpperCase()}`);
+    if (!res?.ok) return;
+    const avatars = res?.data?.player_avatars;
+    setPlayerAvatars(avatars && typeof avatars === "object" ? avatars : {});
+  }
+
   // Guard: redirect to /jury if no session state
   useEffect(() => {
     if (!roomCode || !jurorName) {
       navigate("/jury", { replace: true });
     }
   }, [roomCode, jurorName, navigate]);
+
+  useEffect(() => {
+    if (!roomCode) return;
+    refreshPlayerAvatars(roomCode);
+  }, [roomCode]);
 
   // WS connection
   useEffect(() => {
@@ -103,6 +118,7 @@ export default function JuryVote() {
           setCorrectAnswer(null);
           setScoreSnapshot(null);
 
+          refreshPlayerAvatars(roomCode);
           setPhase("voting");
           return;
         }
@@ -153,6 +169,20 @@ export default function JuryVote() {
           return;
         }
 
+        // Timer/stage messages — passive handling for future Stage 3 timer support
+        if (msg.type === "timer_update") {
+          // Future: display a countdown during jury phase when a jury timer is added
+          return;
+        }
+        if (msg.type === "stage_ready") {
+          // Future: handle jury stage_ready when Stage 3 is timed
+          return;
+        }
+        if (msg.type === "stage_transition") {
+          // Future: react to stage transitions (e.g., timer starts for jury phase)
+          return;
+        }
+
         // Ignore other message types
       } catch {
         // ignore parse errors
@@ -166,6 +196,29 @@ export default function JuryVote() {
       }
     };
   }, [roomCode]);
+
+  useEffect(() => {
+    if (phase !== "submitted") return;
+
+    setRevealBestIdentity(false);
+    setRevealWorstIdentity(false);
+
+    const bestTimer = setTimeout(() => {
+      setRevealBestIdentity(true);
+    }, 900);
+
+    let worstTimer = null;
+    if (enableWorstFake && worstSelectedPlayer) {
+      worstTimer = setTimeout(() => {
+        setRevealWorstIdentity(true);
+      }, 1800);
+    }
+
+    return () => {
+      clearTimeout(bestTimer);
+      if (worstTimer) clearTimeout(worstTimer);
+    };
+  }, [phase, enableWorstFake, worstSelectedPlayer]);
 
   function submitVote() {
     if (phase !== "voting") return;
@@ -209,6 +262,28 @@ export default function JuryVote() {
     if (!worstSelectedPlayer) return null;
     return answers.find((a) => a.player === worstSelectedPlayer)?.text ?? null;
   }, [answers, worstSelectedPlayer]);
+
+  const bestAvatarUrl = useMemo(() => {
+    if (!bestSelectedPlayer) return "";
+    return playerAvatars?.[bestSelectedPlayer] || "";
+  }, [playerAvatars, bestSelectedPlayer]);
+
+  const worstAvatarUrl = useMemo(() => {
+    if (!worstSelectedPlayer) return "";
+    return playerAvatars?.[worstSelectedPlayer] || "";
+  }, [playerAvatars, worstSelectedPlayer]);
+
+  const bestInitials = useMemo(() => {
+    if (!bestSelectedPlayer) return "?";
+    const words = String(bestSelectedPlayer).trim().split(/\s+/).filter(Boolean);
+    return words.slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("") || "?";
+  }, [bestSelectedPlayer]);
+
+  const worstInitials = useMemo(() => {
+    if (!worstSelectedPlayer) return "?";
+    const words = String(worstSelectedPlayer).trim().split(/\s+/).filter(Boolean);
+    return words.slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("") || "?";
+  }, [worstSelectedPlayer]);
 
   const leaderboardTop = useMemo(() => {
     const scores = scoreSnapshot?.scores;
@@ -368,23 +443,119 @@ export default function JuryVote() {
               <div className="text-sm text-emerald-200/80 mb-8">{submitStatus}</div>
             </div>
 
-            <div className="mx-auto max-w-3xl space-y-3">
-              <div className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/70 p-4">
-                <div className="text-xs font-bold uppercase tracking-widest text-indigo-300/70">
-                  Best Fake Chosen
+            <div className="mx-auto max-w-3xl space-y-4">
+              <div className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/70 p-5 overflow-hidden">
+                <div className="text-xs font-bold uppercase tracking-widest text-indigo-300/70 mb-2">
+                  Best Fake Reveal
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white whitespace-pre-wrap">
+                <div className="text-sm font-semibold text-white whitespace-pre-wrap">
                   {bestText || "(not available)"}
+                </div>
+
+                <div className="relative mt-4 min-h-[90px]">
+                  <div
+                    className={`absolute inset-0 flex items-center gap-3 rounded-xl border border-indigo-500/20 bg-indigo-950/30 px-4 py-3 transition-all duration-[1400ms] ease-out ${
+                      revealBestIdentity
+                        ? "opacity-0 blur-sm scale-[0.98]"
+                        : "opacity-100 blur-0 scale-100"
+                    }`}
+                  >
+                    <div className="h-12 w-12 rounded-full border border-indigo-400/40 bg-indigo-900/70 flex items-center justify-center text-lg font-black text-indigo-200">
+                      ?
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-300/70">
+                        Identity
+                      </div>
+                      <div className="text-base font-bold text-white">Anonymous</div>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`absolute inset-0 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-950/25 px-4 py-3 transition-all duration-[1400ms] ease-out ${
+                      revealBestIdentity
+                        ? "opacity-100 blur-0 scale-100"
+                        : "opacity-0 blur-sm scale-[0.98]"
+                    }`}
+                  >
+                    {bestAvatarUrl ? (
+                      <img
+                        src={bestAvatarUrl}
+                        alt={bestSelectedPlayer || "Player"}
+                        className="h-12 w-12 rounded-full border border-emerald-300/40 object-cover"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-full border border-emerald-300/40 bg-emerald-900/60 flex items-center justify-center text-sm font-black text-emerald-100">
+                        {bestInitials}
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300/80">
+                        Revealed
+                      </div>
+                      <div className="text-base font-bold text-white">
+                        {bestSelectedPlayer || "(player unavailable)"}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {enableWorstFake && (
-                <div className="rounded-xl border border-pink-500/20 bg-[#0a0523]/70 p-4">
-                  <div className="text-xs font-bold uppercase tracking-widest text-pink-300/70">
-                    Worst Fake Chosen
+              {enableWorstFake && worstText && (
+                <div className="rounded-xl border border-pink-500/20 bg-[#0a0523]/70 p-5 overflow-hidden">
+                  <div className="text-xs font-bold uppercase tracking-widest text-pink-300/70 mb-2">
+                    Worst Fake Reveal
                   </div>
-                  <div className="mt-2 text-sm font-semibold text-white whitespace-pre-wrap">
-                    {worstText || "(none)"}
+                  <div className="text-sm font-semibold text-white whitespace-pre-wrap">
+                    {worstText}
+                  </div>
+
+                  <div className="relative mt-4 min-h-[90px]">
+                    <div
+                      className={`absolute inset-0 flex items-center gap-3 rounded-xl border border-pink-500/20 bg-pink-950/20 px-4 py-3 transition-all duration-[1400ms] ease-out ${
+                        revealWorstIdentity
+                          ? "opacity-0 blur-sm scale-[0.98]"
+                          : "opacity-100 blur-0 scale-100"
+                      }`}
+                    >
+                      <div className="h-12 w-12 rounded-full border border-pink-300/40 bg-pink-900/60 flex items-center justify-center text-lg font-black text-pink-100">
+                        ?
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-pink-300/70">
+                          Identity
+                        </div>
+                        <div className="text-base font-bold text-white">Anonymous</div>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`absolute inset-0 flex items-center gap-3 rounded-xl border border-pink-500/30 bg-pink-950/30 px-4 py-3 transition-all duration-[1400ms] ease-out ${
+                        revealWorstIdentity
+                          ? "opacity-100 blur-0 scale-100"
+                          : "opacity-0 blur-sm scale-[0.98]"
+                      }`}
+                    >
+                      {worstAvatarUrl ? (
+                        <img
+                          src={worstAvatarUrl}
+                          alt={worstSelectedPlayer || "Player"}
+                          className="h-12 w-12 rounded-full border border-pink-300/40 object-cover"
+                        />
+                      ) : (
+                        <div className="h-12 w-12 rounded-full border border-pink-300/40 bg-pink-900/60 flex items-center justify-center text-sm font-black text-pink-100">
+                          {worstInitials}
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-pink-300/80">
+                          Revealed
+                        </div>
+                        <div className="text-base font-bold text-white">
+                          {worstSelectedPlayer || "(player unavailable)"}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

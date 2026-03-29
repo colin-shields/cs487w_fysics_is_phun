@@ -43,6 +43,12 @@ export default function HostGame() {
   const [totalJurors, setTotalJurors] = useState(0);
   const [roundBreakdown, setRoundBreakdown] = useState(null);
   const [currentScores, setCurrentScores] = useState({});
+  // Timer / stage state
+  const [timerRemaining, setTimerRemaining] = useState(null);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const [timerStatus, setTimerStatus] = useState("idle"); // "running" | "paused" | "ready" | "idle"
+  const [currentStage, setCurrentStage] = useState(null);
+  const [stageReadyReason, setStageReadyReason] = useState(null);
   const wsRef = React.useRef(null);
 
   useEffect(() => {
@@ -61,6 +67,7 @@ export default function HostGame() {
     ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
+        console.log("Received message:", msg.type, msg);
         if (msg.type === "submission") {
           setSubmissions((prev) => [...prev, msg.player]);
         } else if (msg.type === "answers") {
@@ -76,6 +83,23 @@ export default function HostGame() {
           setRoundBreakdown(msg.breakdown || {});
           setCurrentScores(msg.scores || {});
           setPhase("roundLeaderboard");
+        } else if (msg.type === "timer_update") {
+          setTimerRemaining(msg.remaining);
+          setTimerPaused(msg.paused);
+          setTimerStatus(msg.status);
+          setCurrentStage(msg.stage);
+        } else if (msg.type === "stage_ready") {
+          setTimerStatus("ready");
+          setStageReadyReason(msg.reason);
+        } else if (msg.type === "stage_transition") {
+          // Only clear the ready banner — phase changes are driven by subsequent messages
+          // (e.g. "answers" msg sets phase="answers", "results" msg sets phase="results")
+          setStageReadyReason(null);
+          setTimerStatus("idle");
+        } else if (msg.type === "skip_question") {
+          setCurrentQuestionIndex((prev) =>
+            prev < totalQuestions - 1 ? prev + 1 : prev
+          );
         }
       } catch (e) {
         // ignore
@@ -119,8 +143,19 @@ export default function HostGame() {
     setResultStats(null);
     setJuryVoteCount(0);
     setRoundBreakdown(null);
+    setTimerRemaining(null);
+    setTimerPaused(false);
+    setTimerStatus("idle");
+    setCurrentStage(null);
+    setStageReadyReason(null);
     if (wsConnected) sendCurrentQuestion();
   }, [currentQuestionIndex, wsConnected]);
+
+  function goToPrev() {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(currentQuestionIndex - 1);
+    }
+  }
 
   function goToNext() {
     if (currentQuestionIndex < totalQuestions - 1) {
@@ -128,16 +163,42 @@ export default function HostGame() {
     }
   }
 
-  function broadcastAnswers() {
-    const answerSet = [];
-    if (currentQuestion.Correct_Answer) answerSet.push(currentQuestion.Correct_Answer);
-    if (currentQuestion.Predefined_Fake) answerSet.push(currentQuestion.Predefined_Fake);
-    wsRef.current.send(JSON.stringify({ type: "answers", answers: answerSet }));
-    setPhase("answers");
+  function sendHostNext(stage) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "host_next", stage }));
+      console.log("Sent host_next for stage", stage);
+      setStageReadyReason(null);
+    }
+  }
+
+  function sendPause() {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "pause" }));
+    }
+  }
+
+  function sendResume() {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "resume" }));
+    }
+  }
+
+  function sendExtendTimer() {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "extend_timer" }));
+    }
+  }
+
+  function sendSkipQuestion() {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "skip_question" }));
+    }
   }
 
   function requestResults() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Release the Stage 2 READY gate first, then request stats
+      wsRef.current.send(JSON.stringify({ type: "host_next", stage: 2 }));
       wsRef.current.send(JSON.stringify({ type: "results_request" }));
     }
   }
@@ -206,6 +267,8 @@ export default function HostGame() {
       </header>
 
       <main className="mx-auto w-full max-w-5xl px-4 py-8 space-y-6 flex-grow flex flex-col">
+
+
         {/* Question Counter */}
         <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/30 backdrop-blur-md p-6 shrink-0 relative overflow-hidden group">
           <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
@@ -241,6 +304,45 @@ export default function HostGame() {
               </div>
             </div>
           </div>
+
+          {/* Timer bar — shown during Stage 1 and Stage 2 */}
+          {timerRemaining !== null && timerStatus !== "idle" && (
+            <div className="mt-4 flex items-center gap-3 relative z-10">
+              <div className={`text-2xl font-black tabular-nums w-20 ${
+                timerStatus === "paused" ? "text-yellow-400" :
+                timerStatus === "ready"  ? "text-amber-400" :
+                timerRemaining <= 10     ? "text-red-400 animate-pulse" :
+                                           "text-white"
+              }`}>
+                {timerStatus === "ready" ? "READY" : `${timerRemaining}s`}
+              </div>
+              {(timerStatus === "running" || timerStatus === "paused") && (
+                <div className="flex gap-2">
+                  {timerStatus === "running" ? (
+                    <button
+                      onClick={sendPause}
+                      className="text-xs px-3 py-1 rounded-lg border border-yellow-500/40 text-yellow-300 hover:bg-yellow-900/40 transition-all"
+                    >
+                      Pause
+                    </button>
+                  ) : (
+                    <button
+                      onClick={sendResume}
+                      className="text-xs px-3 py-1 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40 transition-all"
+                    >
+                      Resume
+                    </button>
+                  )}
+                  <button
+                    onClick={sendExtendTimer}
+                    className="text-xs px-3 py-1 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/40 transition-all"
+                  >
+                    +15s
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Question Display */}
@@ -282,35 +384,70 @@ export default function HostGame() {
           )}
         </section>
 
+        {/* READY banner — informational only; the main phase button below is what advances */}
+        {timerStatus === "ready" && (
+          <section className="rounded-xl border border-amber-500/40 bg-amber-950/30 px-5 py-3 shrink-0">
+            <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-0.5">
+              Stage {currentStage} Complete
+            </div>
+            <div className="text-sm text-amber-200/70">
+              {stageReadyReason === "timeout" ? "Time expired." : "All players submitted."}{" "}
+              Use the button below to advance.
+            </div>
+          </section>
+        )}
+
         {/* Navigation Controls (phase-aware) */}
         <section className="flex flex-col sm:flex-row gap-4 shrink-0">
           <button
-            onClick={goToNext}
-            disabled={phase !== "collecting"}
+            onClick={goToPrev}
+            disabled={phase !== "collecting" || currentQuestionIndex === 0}
             className="sm:w-1/4 rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-200 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 disabled:opacity-40 disabled:hover:bg-indigo-950/60 disabled:hover:text-indigo-200 disabled:hover:border-indigo-500/30 transition-all flex items-center justify-center gap-2 shadow-inner"
           >
             ← Prev
           </button>
 
           {phase === "collecting" && (
-            <button
-              onClick={broadcastAnswers}
-              className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
-            >
-              Show Answers
-              <span className="bg-[#0a0523]/40 border border-indigo-400/30 px-2 py-0.5 rounded-full text-xs shadow-inner">
-                {submissions.length} submitted
-              </span>
-            </button>
+            <>
+              <button
+                onClick={() => sendHostNext(1)}
+                disabled={timerStatus !== "ready"}
+                className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-none transition-all flex items-center justify-center gap-3"
+              >
+                Show Answers
+                <span className="bg-[#0a0523]/40 border border-indigo-400/30 px-2 py-0.5 rounded-full text-xs shadow-inner">
+                  {submissions.length} submitted
+                </span>
+              </button>
+              {timerStatus !== "ready" && (
+                <button
+                  onClick={() => sendHostNext(1)}
+                  className="sm:w-auto rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-300 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 transition-all flex items-center justify-center"
+                >
+                  Skip Phase
+                </button>
+              )}
+            </>
           )}
 
           {phase === "answers" && (
-            <button
-              onClick={requestResults}
-              className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 transition-all outline outline-2 outline-offset-2 outline-emerald-500/50"
-            >
-              Show Results
-            </button>
+            <>
+              <button
+                onClick={requestResults}
+                disabled={timerStatus !== "ready"}
+                className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-none transition-all outline outline-2 outline-offset-2 outline-emerald-500/50"
+              >
+                Show Results
+              </button>
+              {timerStatus !== "ready" && (
+                <button
+                  onClick={requestResults}
+                  className="sm:w-auto rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-300 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 transition-all flex items-center justify-center"
+                >
+                  Skip Phase
+                </button>
+              )}
+            </>
           )}
 
           {phase === "results" && (
@@ -323,12 +460,22 @@ export default function HostGame() {
           )}
 
           {phase === "jury" && (
-            <button
-              onClick={requestJuryResults}
-              className="flex-1 rounded-xl bg-gradient-to-r from-teal-600 to-cyan-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(20,184,166,0.3)] hover:shadow-[0_0_30px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
-            >
-              Show Round Scores
-            </button>
+            <>
+              <button
+                onClick={requestJuryResults}
+                className="flex-1 rounded-xl bg-gradient-to-r from-teal-600 to-cyan-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(20,184,166,0.3)] hover:shadow-[0_0_30px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                Show Round Scores
+              </button>
+              {juryVoteCount < totalJurors && (
+                <button
+                  onClick={requestJuryResults}
+                  className="sm:w-auto rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-300 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 transition-all flex items-center justify-center"
+                >
+                  Skip Phase
+                </button>
+              )}
+            </>
           )}
 
           {phase === "roundLeaderboard" && (
@@ -344,12 +491,18 @@ export default function HostGame() {
             </button>
           )}
 
-          <button
-            onClick={onExitGame}
-            className="shrink-0 sm:w-1/6 rounded-xl bg-pink-950/40 border border-pink-900/50 px-4 py-4 text-sm font-bold text-pink-400 hover:bg-pink-600 hover:text-white hover:border-transparent hover:shadow-[0_0_15px_rgba(219,39,119,0.5)] transition-all flex items-center justify-center"
-          >
-            Exit
-          </button>
+          {phase !== "roundLeaderboard" && (
+            <button
+              onClick={isLastQuestion ? onEndGame : sendSkipQuestion}
+              className={`sm:w-auto rounded-xl px-4 py-4 text-sm font-bold transition-all flex items-center justify-center ${
+                isLastQuestion
+                  ? "bg-emerald-900/40 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600 hover:text-white hover:border-transparent"
+                  : "bg-indigo-950/60 border border-indigo-500/30 text-indigo-200 hover:bg-indigo-800 hover:text-white hover:border-indigo-400"
+              }`}
+            >
+              {isLastQuestion ? "End Game" : "Next Question →"}
+            </button>
+          )}
         </section>
 
         {/* Phase-specific info panels */}
@@ -405,6 +558,17 @@ export default function HostGame() {
           </section>
         )}
 
+        {phase === "jury" && juryVoteCount >= totalJurors && totalJurors > 0 && (
+          <section className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-5 py-3 shrink-0">
+            <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-0.5">
+              All Jurors Voted
+            </div>
+            <div className="text-sm text-emerald-200/70">
+              All {totalJurors} jurors have submitted their votes — ready to show round scores.
+            </div>
+          </section>
+        )}
+
         {phase === "jury" && (
           <section className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-6 shadow-inner">
             <div className="flex items-center justify-between">
@@ -447,7 +611,7 @@ export default function HostGame() {
                     <tr key={p.name} className={`border-b border-indigo-500/10 ${idx === 0 ? "bg-emerald-950/20" : ""}`}>
                       <td className="py-3 pr-4 font-bold text-white flex items-center gap-2">
                         {idx === 0 && <span className="text-emerald-400 text-xs">★</span>}
-                        {p.name}
+                        {p.name === "Predefined Fake" ? "Host" : p.name}
                       </td>
                       <td className="text-center py-3 px-2 text-emerald-300 font-mono">{fmtPts(p.correct_pts)}</td>
                       <td className="text-center py-3 px-2 text-indigo-300 font-mono">{fmtPts(p.fool_pts)}</td>

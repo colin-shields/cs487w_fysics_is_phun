@@ -28,6 +28,10 @@ export default function HostLeaderboard() {
   const [roundBreakdown, setRoundBreakdown] = useState({});
   const { activeDeck } = useDeck();
 
+  function displayName(raw) {
+    return raw === "Predefined Fake" ? "Host" : raw;
+  }
+
   function buildSessionResults(submissions, choices, scores, roundBreakdown) {
     const players = new Set();
 
@@ -79,7 +83,7 @@ export default function HostLeaderboard() {
 
     // 3. FILL PLAYER DATA
     for (const playerName of Object.values(playerList)) {
-      const row = [playerName];
+      const row = [displayName(playerName)];
 
       questionList.forEach((question) => {
         const qid = question.Question_ID -1 ; // Adjusting for 0-based index in submissions and choices
@@ -132,7 +136,7 @@ export default function HostLeaderboard() {
     // 4. CREATE SUMMARY ROW (The Footer)
     const summaryRow = ["TOTAL POINTS AWARDED"];
     questionList.forEach((question) => {
-      const qid = question.Question_ID;
+      const qid = question.Question_ID - 1; // 0-based index, same as detail rows
       // We leave Submission, Choice, and Fooled empty for the summary, just show Total Points
       summaryRow.push("", "", "Q Total:", questionTotals[qid] || 0);
     });
@@ -324,7 +328,7 @@ export default function HostLeaderboard() {
                   ★ Champion ★
                 </div>
                 <div className="text-2xl md:text-3xl font-bold text-white px-8 py-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/40 shadow-[0_0_30px_rgba(16,185,129,0.2)] backdrop-blur-sm">
-                  {players[0].name || players[0][0] || "Unknown Player"}
+                  {displayName(players[0].name || players[0][0] || "Unknown Player")}
                 </div>
               </div>
             </div>
@@ -393,7 +397,7 @@ export default function HostLeaderboard() {
                         <div
                           className={`font-bold tracking-wide ${idx === 0 ? "text-xl text-white drop-shadow-sm" : "text-lg text-indigo-100"}`}
                         >
-                          {player[0] || player.name || "Unknown Player"}
+                          {displayName(player[0] || player.name || "Unknown Player")}
                         </div>
                       </div>
                       <div className="text-xs font-bold uppercase text-indigo-400/50 group-hover:text-indigo-400 transition-colors">

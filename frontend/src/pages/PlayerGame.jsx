@@ -47,6 +47,14 @@ export default function PlayerGame() {
   const [myRoundBreakdown, setMyRoundBreakdown] = useState(null);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
 
+  // timer / stage state
+  const [timerRemaining, setTimerRemaining] = useState(null);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const [timerStatus, setTimerStatus] = useState("idle"); // "running" | "paused" | "ready" | "idle"
+  const [stageLocked, setStageLocked] = useState(false);  // true when stage ended or paused
+  const [hasSubmitted, setHasSubmitted] = useState(false); // true after first fake submit
+  const [timerError, setTimerError] = useState(null);      // server-sent rejection message
+
   const syncedAvatarUrl =
     playerAvatarUrl || sessionStatus?.player_avatars?.[playerName] || "";
   const resolvedAvatarUrl = getImageUrl(syncedAvatarUrl);
@@ -110,6 +118,31 @@ export default function PlayerGame() {
           setMyChoice(null);
           setCorrectAnswer(null);
           setMyRoundBreakdown(null);
+          // reset timer state for the new question
+          setTimerRemaining(null);
+          setTimerPaused(false);
+          setTimerStatus("idle");
+          setStageLocked(false);
+          setHasSubmitted(false);
+          setTimerError(null);
+        } else if (msg.type === "timer_update") {
+          setTimerRemaining(msg.remaining);
+          setTimerPaused(msg.paused);
+          setTimerStatus(msg.status);
+          setStageLocked(msg.status === "paused");
+        } else if (msg.type === "stage_ready") {
+          setStageLocked(true);
+          setTimerStatus("ready");
+        } else if (msg.type === "stage_transition") {
+          // Unlock inputs; only clear timer display when moving to an untimed stage (2→3)
+          setStageLocked(false);
+          if (msg.to_stage === 3) {
+            setTimerStatus("idle");
+            setTimerRemaining(null);
+          }
+        } else if (msg.type === "timer_error") {
+          setTimerError(msg.message);
+          setTimeout(() => setTimerError(null), 3000);
         } else if (msg.type === "cancelled") {
           setSessionCancelled(true);
         } else if (msg.type === "game_finished") {
@@ -284,6 +317,27 @@ export default function PlayerGame() {
               </div>
             )}
 
+            {/* Timer countdown — shown during Stage 1 and Stage 2 */}
+            {timerRemaining !== null && timerStatus !== "idle" && (
+              <div className={`mb-4 px-4 py-2 rounded-xl text-center font-black text-2xl tabular-nums ${
+                timerStatus === "paused" ? "text-yellow-400 bg-yellow-950/30 border border-yellow-500/20" :
+                timerStatus === "ready"  ? "text-amber-400 bg-amber-950/30 border border-amber-500/20" :
+                timerRemaining <= 10     ? "text-red-400 bg-red-950/30 border border-red-500/20 animate-pulse" :
+                                           "text-white bg-indigo-950/30 border border-indigo-500/20"
+              }`}>
+                {timerStatus === "ready"  ? "Waiting for host..." :
+                 timerStatus === "paused" ? `Paused — ${timerRemaining}s` :
+                 `${timerRemaining}s`}
+              </div>
+            )}
+
+            {/* Server rejection / timer error toast */}
+            {timerError && (
+              <div className="mb-4 rounded-xl border border-pink-500/40 bg-pink-950/30 px-4 py-2 text-sm font-bold text-pink-200 text-center">
+                {timerError}
+              </div>
+            )}
+
             {/* Submit phase */}
             {phase === "submit" && (
               <div className="mt-8">
@@ -292,11 +346,12 @@ export default function PlayerGame() {
                   placeholder="Your fake answer"
                   value={myFake}
                   onChange={(e) => setMyFake(e.target.value)}
-                  className="w-full rounded-xl border border-indigo-500/30 bg-indigo-950/30 px-4 py-4 text-lg text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 transition-all shadow-inner"
+                  disabled={stageLocked}
+                  className={`w-full rounded-xl border border-indigo-500/30 bg-indigo-950/30 px-4 py-4 text-lg text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 transition-all shadow-inner ${stageLocked ? "opacity-50 cursor-not-allowed" : ""}`}
                 />
                 <button
                   onClick={() => {
-                    if (!myFake) return;
+                    if (!myFake || stageLocked) return;
                     if (
                       wsRef.current &&
                       wsRef.current.readyState === WebSocket.OPEN
@@ -309,13 +364,25 @@ export default function PlayerGame() {
                         }),
                       );
                     }
-                    setPhase("waiting");
+                    setHasSubmitted(true); // stay in submit phase — allow re-editing
                   }}
-                  disabled={!myFake}
-                  className="mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 text-lg font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] disabled:hover:scale-100 disabled:opacity-50 transition-all"
+                  disabled={!myFake || stageLocked}
+                  className={`mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 text-lg font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] disabled:hover:scale-100 disabled:opacity-50 transition-all ${stageLocked ? "cursor-not-allowed" : ""}`}
                 >
-                  Submit Fake
+                  {hasSubmitted ? "Update Answer" : "Submit Fake"}
                 </button>
+                {hasSubmitted && !stageLocked && (
+                  <div className="mt-3 text-sm text-emerald-400/80 text-center">
+                    Answer submitted. You can update it until time runs out.
+                  </div>
+                )}
+                {hasSubmitted && stageLocked && (
+                  <div className="mt-3 text-sm text-amber-300/80 text-center">
+                    {timerPaused
+                      ? "Game paused by host."
+                      : "Submissions closed. Waiting for host to show answers."}
+                  </div>
+                )}
               </div>
             )}
 
@@ -352,6 +419,7 @@ export default function PlayerGame() {
                   <button
                     key={idx}
                     onClick={() => {
+                      if (myChoice || stageLocked) return;
                       setMyChoice(ans);
                       if (
                         wsRef.current &&
@@ -366,7 +434,7 @@ export default function PlayerGame() {
                         );
                       }
                     }}
-                    disabled={!!myChoice}
+                    disabled={!!myChoice || stageLocked}
                     className={`w-full rounded-xl border ${myChoice === ans ? "border-purple-500 bg-purple-900/40 shadow-[0_0_15px_rgba(168,85,247,0.3)]" : "border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 hover:border-purple-400"} px-6 py-4 text-lg font-semibold text-white transition-all disabled:opacity-70`}
                   >
                     {ans}

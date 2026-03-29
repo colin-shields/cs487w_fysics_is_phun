@@ -41,7 +41,7 @@ export default function PlayerJoin() {
         if (res.status === 404) {
           setError("Room not found. Check the code and try again.");
         } else if (res.status === 400) {
-          setError("Game has already started or room is full.");
+          setError(res.data?.detail || "Game has already started or room is full.");
         } else {
           setError(`Failed to join (HTTP ${res.status}).`);
         }

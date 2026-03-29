@@ -41,6 +41,8 @@ export default function HostSessionSetup() {
         {
           deck_id: activeDeck.deckId || activeDeck.name,
           enable_worst_fake: enableWorstFake,
+          stage1_duration: stage1Seconds,
+          stage2_duration: stage2Seconds,
         },
         headers,
       );

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { buildUrl, httpDelete } from "../../api/httpClient";
 import { getHostCode } from "../../utils/hostAuth";
+import playerQr from "../../assets/player_qr.png";
+import juryQr from "../../assets/jury_qr.png";
 
 function getAvatarUrl(imagePath) {
   if (!imagePath) return "";
@@ -130,6 +132,16 @@ export default function HostLobby() {
           </div>
           <div className="mt-6 text-sm font-medium text-indigo-200/70">
             Share this code with players to join
+          </div>
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-8">
+            <div className="flex flex-col items-center gap-2">
+              <img src={playerQr} alt="Player join QR code" className="w-36 h-36 rounded-xl border border-indigo-500/30 shadow-md bg-white p-2" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-300/70">Player Join</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <img src={juryQr} alt="Jury join QR code" className="w-36 h-36 rounded-xl border border-indigo-500/30 shadow-md bg-white p-2" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-300/70">Jury Join</span>
+            </div>
           </div>
         </section>
 

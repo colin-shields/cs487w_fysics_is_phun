@@ -124,6 +124,8 @@ session_sockets: Dict[str, List[WebSocket]] = {}
 class SessionRequest(BaseModel):
     deck_id: str
     enable_worst_fake: bool = False
+    stage1_duration: int = 60
+    stage2_duration: int = 45
 
 @app.post("/create-session")
 async def create_session(request: SessionRequest):
@@ -146,6 +148,15 @@ async def create_session(request: SessionRequest):
         "scores": {},            # player -> float score
         "jury_votes": {},        # questionIndex -> { juror_name: { best: player_name, worst: player_name|None } }
         "round_breakdown": {},   # questionIndex -> { player: { correct_pts, fool_pts, jury_best_pts, jury_worst_pts } }
+        # Timer/stage fields
+        "stage1_duration": request.stage1_duration,
+        "stage2_duration": request.stage2_duration,
+        "timer_task": None,               # asyncio.Task | None
+        "timer_remaining": 0,             # int seconds remaining
+        "timer_paused": False,            # bool
+        "current_stage": None,            # 1 | 2 | 3 | None
+        "stage_status": "idle",           # "running" | "paused" | "ready" | "idle"
+        "current_answers_shuffled": [],   # shuffled answer list, stored for reconnect resync
     }
     
     return {"room_code": room_code}
@@ -171,8 +182,13 @@ async def join_session(request: JoinRequest):
     # 2. Check if the game is already started
     if active_sessions[code]["status"] != "lobby":
         raise HTTPException(status_code=400, detail="Game already in progress")
-    
-    # 3. Add the player to the list
+
+    # 3. Check for duplicate nickname across players and jurors
+    existing_names = active_sessions[code]["players"] + active_sessions[code]["jurors"]
+    if request.player_name in existing_names:
+        raise HTTPException(status_code=400, detail="Nickname already taken. Please choose a different name.")
+
+    # 4. Add the player to the list
     if request.player_type == "player" or not request.player_type:
         active_sessions[code]["players"].append(request.player_name)
         avatar_url = (request.avatar_url or "").strip()
@@ -238,6 +254,95 @@ async def cancel_session(room_code: str, _ok: bool = Depends(require_host)):
 
 
 
+import asyncio
+
+async def _broadcast(code: str, msg: dict):
+    """Send a JSON message to all WebSocket connections in a room."""
+    for ws in session_sockets.get(code, [])[:]:
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            pass
+
+async def _cancel_timer(code: str):
+    """Cancel the running timer task for a room, if any."""
+    sess = active_sessions.get(code)
+    if not sess:
+        return
+    task = sess.get("timer_task")
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    sess["timer_task"] = None
+
+async def _end_stage(code: str, stage: int, reason: str):
+    """
+    Called when a stage ends (timeout or all_submitted).
+    Fills in missing submissions/choices, sets stage_status to 'ready',
+    and broadcasts stage_ready. Idempotent — safe to call multiple times.
+    """
+    sess = active_sessions.get(code)
+    if not sess or sess.get("stage_status") == "ready":
+        return  # guard against double-invocation
+    sess["stage_status"] = "ready"
+    sess["timer_paused"] = False
+    idx = sess.get("current_index")
+    if stage == 1:
+        submitted = {e["player"] for e in sess.get("submissions", {}).get(idx, [])}
+        for player in sess.get("players", []):
+            if player not in submitted:
+                sess["submissions"].setdefault(idx, []).append({"player": player, "text": "No submission"})
+    elif stage == 2:
+        chose = {e["player"] for e in sess.get("choices", {}).get(idx, [])}
+        for player in sess.get("players", []):
+            if player not in chose:
+                sess["choices"].setdefault(idx, []).append({"player": player, "text": "No guess"})
+    await _broadcast(code, {"type": "stage_ready", "stage": stage, "reason": reason})
+
+async def _run_stage_timer(code: str, stage: int, duration: int):
+    """
+    Counts down `duration` seconds for the given stage.
+    Broadcasts timer_update every second. Respects timer_paused.
+    When remaining hits 0, calls _end_stage with reason 'timeout'.
+    """
+    sess = active_sessions.get(code)
+    if not sess:
+        return
+    sess["timer_remaining"] = duration
+    sess["current_stage"] = stage
+    sess["stage_status"] = "running"
+    sess["timer_paused"] = False
+    try:
+        while sess["timer_remaining"] > 0:
+            await _broadcast(code, {
+                "type": "timer_update",
+                "stage": stage,
+                "remaining": sess["timer_remaining"],
+                "paused": sess["timer_paused"],
+                "status": sess["stage_status"],
+            })
+            await asyncio.sleep(1)
+            if not sess["timer_paused"]:
+                sess["timer_remaining"] -= 1
+            if sess.get("stage_status") == "ready":
+                return  # externally ended (all_submitted path)
+        await _end_stage(code, stage, "timeout")
+    except asyncio.CancelledError:
+        pass  # cancelled by skip_question, end_game, or new question
+
+async def _start_stage(code: str, stage: int):
+    """Cancel any existing timer and start a new one for the given stage."""
+    await _cancel_timer(code)
+    sess = active_sessions.get(code)
+    if not sess:
+        return
+    duration = sess["stage1_duration"] if stage == 1 else sess["stage2_duration"]
+    sess["timer_task"] = asyncio.create_task(_run_stage_timer(code, stage, duration))
+
+
 @app.websocket("/ws/session/{room_code}")
 async def session_ws(websocket: WebSocket, room_code: str):
     # debug info for every handshake attempt
@@ -257,16 +362,36 @@ async def session_ws(websocket: WebSocket, room_code: str):
     session_sockets.setdefault(code, []).append(websocket)
     print(f"Registered socket for {code}; total connections={len(session_sockets[code])}")
 
-    # send current question immediately if one exists
+    # resync a reconnecting client to current game state
     sess = active_sessions.get(code)
     if sess:
         idx = sess.get("current_index")
         if idx is not None:
+            # 1. resend current question
             payload = {"type": "question", "index": idx}
             if "current_question" in sess:
                 payload["question"] = sess["current_question"]
             await websocket.send_json(payload)
             print(f"Sent initial question payload to new client for room={code}")
+            # 2. resend timer state if a stage is active
+            if sess.get("current_stage") is not None:
+                await websocket.send_json({
+                    "type": "timer_update",
+                    "stage": sess["current_stage"],
+                    "remaining": sess["timer_remaining"],
+                    "paused": sess["timer_paused"],
+                    "status": sess["stage_status"],
+                })
+            # 3. if Stage 2 is active, resend the shuffled answers so the player can choose
+            if sess.get("current_stage") == 2 and sess.get("current_answers_shuffled"):
+                await websocket.send_json({"type": "answers", "answers": sess["current_answers_shuffled"]})
+            # 4. if READY state, resend stage_ready so clients show the correct banner
+            if sess.get("stage_status") == "ready":
+                await websocket.send_json({
+                    "type": "stage_ready",
+                    "stage": sess.get("current_stage"),
+                    "reason": "reconnect",
+                })
 
     try:
         while True:
@@ -279,6 +404,10 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 active_sessions[code]["current_index"] = msg.get("index")
                 active_sessions[code]["current_question"] = msg.get("question")
                 active_sessions[code]["current_correct_answer"] = msg.get("correctAnswer")
+                # reset timer/stage state for the new question
+                await _cancel_timer(code)
+                active_sessions[code]["stage_status"] = "idle"
+                active_sessions[code]["current_answers_shuffled"] = []
                 # broadcast to all peers except sender
                 for ws in session_sockets.get(code, [])[:]:
                     if ws is websocket:
@@ -289,6 +418,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                         session_sockets[code].remove(ws)
                     except Exception:
                         pass
+                # start Stage 1 timer
+                await _start_stage(code, 1)
             elif msg.get("type") == "cancelled": # host is cancelling the game
                 for ws in session_sockets.get(code, [])[:]: # broadcast to all peers except sender
                     if ws is websocket: 
@@ -299,11 +430,24 @@ async def session_ws(websocket: WebSocket, room_code: str):
                         pass
             elif msg.get("type") == "fake":
                 # a player submitted a fake answer
+                sess = active_sessions[code]
+                # reject if Stage 1 is not actively running (paused, ready, or wrong stage)
+                if sess.get("stage_status") != "running" or sess.get("current_stage") != 1:
+                    try:
+                        await websocket.send_json({"type": "timer_error", "message": "Submission not accepted: stage has ended or is paused."})
+                    except Exception:
+                        pass
+                    continue
                 player = msg.get("player")
                 text = msg.get("text")
-                idx = active_sessions[code].get("current_index") # which question index is this for?
-                subs = active_sessions[code].setdefault("submissions", {}) # questionIndex -> [ {player, text}, ... ]. setdefault works by returning the existing value if key exists, or setting it to the provided default (empty dict here) and returning that if key doesn't exist. This way we ensure there's always a dict to work with for "submissions".
-                subs.setdefault(idx, []).append({"player": player, "text": text}) # store the submission in our session state for later retrieval during answer reveal
+                idx = sess.get("current_index")
+                # overwrite existing submission for this player rather than appending
+                subs = sess.setdefault("submissions", {}).setdefault(idx, [])
+                existing = next((e for e in subs if e["player"] == player), None)
+                if existing:
+                    existing["text"] = text
+                else:
+                    subs.append({"player": player, "text": text})
                 # broadcast to host (and others) that a submission arrived
                 for ws in session_sockets.get(code, [])[:]:
                     if ws is websocket:
@@ -312,45 +456,82 @@ async def session_ws(websocket: WebSocket, room_code: str):
                         await ws.send_json({"type": "submission", "player": player})
                     except Exception:
                         pass
-            elif msg.get("type") == "answers":
-                # host is requesting answer reveal; msg.answers contains the base list (correct + predefined)
-                idx = active_sessions[code].get("current_index")
-                # gather player-submitted fakes for this question
-                subs = active_sessions[code].get("submissions", {}).get(idx, [])
-                const_list = list(msg.get("answers") or []) # start with the correct + predefined fakes sent by host
-                for entry in subs:
-                    # entry has {player, text}
-                    const_list.append(entry.get("text"))
-                # optional: randomize order to hide which is correct
-                import random
-                random.shuffle(const_list)
-                # broadcast final list
-                for ws in session_sockets.get(code, [])[:]:
-                    try:
-                        await ws.send_json({"type": "answers", "answers": const_list})
-                    except Exception:
-                        pass
+                # check if all players have submitted — end stage early if so
+                submitted_players = {e["player"] for e in subs}
+                all_players = set(sess.get("players", []))
+                if all_players and submitted_players >= all_players:
+                    await _end_stage(code, 1, "all_submitted")
+                    await _cancel_timer(code)
+            elif msg.get("type") == "host_next":
+                # host clicked "Next" after a READY state — advance to the next stage
+                sess = active_sessions[code]
+                from_stage = msg.get("stage")
+                if from_stage == 1:
+                    # Stage 1 READY -> Stage 2: build shuffled answer list and start Stage 2 timer
+                    idx = sess.get("current_index")
+                    subs = sess.setdefault("submissions", {}).setdefault(idx, [])
+                    # Fill "No submission" for players who haven't submitted (supports Skip Phase before READY)
+                    submitted_players = {e["player"] for e in subs}
+                    for p in sess.get("players", []):
+                        if p not in submitted_players:
+                            subs.append({"player": p, "text": "No submission"})
+                    q = sess.get("current_question", {})
+                    answers_list = []
+                    if q.get("Correct_Answer"):
+                        answers_list.append(q["Correct_Answer"])
+                    if q.get("Predefined_Fake"):
+                        answers_list.append(q["Predefined_Fake"])
+                    for entry in subs:
+                        t = entry.get("text", "")
+                        if t and t != "No submission":
+                            answers_list.append(t)
+                    import random
+                    random.shuffle(answers_list)
+                    sess["current_answers_shuffled"] = answers_list
+                    await _broadcast(code, {"type": "answers", "answers": answers_list})
+                    await _broadcast(code, {"type": "stage_transition", "from_stage": 1, "to_stage": 2})
+                    await _start_stage(code, 2)
+                elif from_stage == 2:
+                    # Stage 2 READY -> Stage 3 (results/jury, untimed): cancel timer + clear ready state
+                    await _cancel_timer(code)
+                    sess["stage_status"] = "idle"
+                    await _broadcast(code, {"type": "stage_transition", "from_stage": 2, "to_stage": 3})
+        
             elif msg.get("type") == "choice":
                 # player chose an answer during answer phase
+                sess = active_sessions[code]
+                # reject if Stage 2 is not actively running
+                if sess.get("stage_status") != "running" or sess.get("current_stage") != 2:
+                    try:
+                        await websocket.send_json({"type": "timer_error", "message": "Choice not accepted: stage has ended or is paused."})
+                    except Exception:
+                        pass
+                    continue
                 player = msg.get("player")
                 choice = msg.get("answer")
-                idx = active_sessions[code].get("current_index")
-                correct = active_sessions[code].get("current_correct_answer", "")
+                idx = sess.get("current_index")
+                correct = sess.get("current_correct_answer", "")
                 if choice and correct and choice.strip().lower() == correct.strip().lower():
                     # correct answer chosen — +1 to this player
-                    active_sessions[code]["scores"][player] = active_sessions[code]["scores"].get(player, 0) + 1
+                    sess["scores"][player] = sess["scores"].get(player, 0) + 1
                 elif choice:
                     # wrong answer — find which player submitted this as their fake and give them +1
-                    subs = active_sessions[code].get("submissions", {}).get(idx, [])
+                    subs = sess.get("submissions", {}).get(idx, [])
                     for entry in subs:
                         if entry.get("text", "").strip().lower() == choice.strip().lower():
                             author = entry.get("player")
                             if author and author != player:
-                                active_sessions[code]["scores"][author] = active_sessions[code]["scores"].get(author, 0) + 1
+                                sess["scores"][author] = sess["scores"].get(author, 0) + 1
                             break
                 # record the choice for stats
-                choices = active_sessions[code].setdefault("choices", {})
+                choices = sess.setdefault("choices", {})
                 choices.setdefault(idx, []).append({"player": player, "text": choice})
+                # check if all players have chosen — end stage early if so
+                chose_players = {e["player"] for e in choices.get(idx, [])}
+                all_players = set(sess.get("players", []))
+                if all_players and chose_players >= all_players:
+                    await _end_stage(code, 2, "all_submitted")
+                    await _cancel_timer(code)
             elif msg.get("type") == "results_request":
                 # host wants to see results for current question
                 idx = active_sessions[code].get("current_index")
@@ -379,8 +560,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 # host starts jury voting phase — compile player fakes and broadcast to all (jurors will handle it)
                 idx = active_sessions[code].get("current_index")
                 subs = active_sessions[code].get("submissions", {}).get(idx, [])
-                fakes = [{"player": e["player"], "text": e["text"]} for e in subs if e.get("player") and e.get("text")]
-                fakes.append({"player": "Predefined Fake", "text": active_sessions[code].get("current_question", {}).get("Predefined_Fake", "")})
+                fakes = [{"player": e["player"], "text": e["text"]} for e in subs if e.get("player") and e.get("text") != "No submission"] # only include real submissions, not the "No submission" placeholders
+                fakes.append({"player": "Host", "text": active_sessions[code].get("current_question", {}).get("Predefined_Fake", "")})
                 enable_worst_fake = active_sessions[code].get("enable_worst_fake", False)
                 total_jurors = len(active_sessions[code].get("jurors", []))
                 payload = {"type": "jury_phase", "fakes": fakes, "enable_worst_fake": enable_worst_fake}
@@ -477,6 +658,19 @@ async def session_ws(websocket: WebSocket, room_code: str):
                         "round_total": round_total,
                     }
 
+                # Include "Predefined Fake" in breakdown if it received any jury votes
+                pf_key = "Host"
+                if pf_key in best_tally or pf_key in worst_tally:
+                    pf_jury_best = round(best_tally.get(pf_key, 0) / total_jurors, 4)
+                    pf_jury_worst = round(worst_tally.get(pf_key, 0) / total_jurors, 4) if enable_worst_fake else 0
+                    breakdown[pf_key] = {
+                        "correct_pts": 0,
+                        "fool_pts": 0,
+                        "jury_best_pts": pf_jury_best,
+                        "jury_worst_pts": pf_jury_worst,
+                        "round_total": round(pf_jury_best - pf_jury_worst, 4),
+                    }
+
                 # store breakdown
                 active_sessions[code].setdefault("round_breakdown", {})[idx] = breakdown
 
@@ -493,8 +687,56 @@ async def session_ws(websocket: WebSocket, room_code: str):
                         await ws.send_json(payload)
                     except Exception:
                         pass
+            elif msg.get("type") == "pause":
+                sess = active_sessions[code]
+                if sess.get("stage_status") == "running":
+                    sess["timer_paused"] = True
+                    sess["stage_status"] = "paused"
+                    await _broadcast(code, {
+                        "type": "timer_update",
+                        "stage": sess["current_stage"],
+                        "remaining": sess["timer_remaining"],
+                        "paused": True,
+                        "status": "paused",
+                    })
+            elif msg.get("type") == "resume":
+                sess = active_sessions[code]
+                if sess.get("stage_status") == "paused":
+                    sess["timer_paused"] = False
+                    sess["stage_status"] = "running"
+                    await _broadcast(code, {
+                        "type": "timer_update",
+                        "stage": sess["current_stage"],
+                        "remaining": sess["timer_remaining"],
+                        "paused": False,
+                        "status": "running",
+                    })
+            elif msg.get("type") == "extend_timer":
+                sess = active_sessions[code]
+                if sess.get("stage_status") in ("running", "paused"):
+                    sess["timer_remaining"] = sess.get("timer_remaining", 0) + 15
+                    await _broadcast(code, {
+                        "type": "timer_update",
+                        "stage": sess["current_stage"],
+                        "remaining": sess["timer_remaining"],
+                        "paused": sess["timer_paused"],
+                        "status": sess["stage_status"],
+                    })
+            elif msg.get("type") == "skip_question":
+                await _cancel_timer(code)
+                sess = active_sessions[code]
+                sess["stage_status"] = "idle"
+                sess["current_stage"] = None
+                await _broadcast(code, {"type": "skip_question"})
+            elif msg.get("type") == "end_game":
+                # new explicit end-game message (keeps "game_finished" for back-compat)
+                await _cancel_timer(code)
+                active_sessions[code]["status"] = "finished"
+                active_sessions[code]["stage_status"] = "idle"
+                await _broadcast(code, {"type": "game_finished"})
             elif msg.get("type") == "game_finished":
                 # host is ending the game; broadcast to all players
+                await _cancel_timer(code)
                 active_sessions[code]["status"] = "finished"
                 for ws in session_sockets.get(code, [])[:]:
                     try:

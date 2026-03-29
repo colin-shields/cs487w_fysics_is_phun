@@ -1,27 +1,20 @@
 import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  getHostCode,
-  clearHostCode,
-  getExpectedCode,
-} from "../../utils/hostAuth";
+import { getHostCode, clearHostCode } from "../../utils/hostAuth";
 import ActiveDeckCard from "../../components/host/ActiveDeckCard.jsx";
 
 export default function HostHome() {
   const navigate = useNavigate();
   const hostCode = getHostCode();
-  const expectedCode = getExpectedCode();
 
-  // 1. HARD GUARD & SECURITY CHECK
+  // Redirect if no host code is present (route guard should normally handle this).
   useEffect(() => {
-    // If code is missing OR doesn't match the environment's truth
-    if (!hostCode || hostCode !== expectedCode) {
-      console.warn("Unauthorized access attempt. Redirecting...");
+    if (!hostCode) {
       clearHostCode();
-      window.location.href = "/host?reason=expired";
+      window.location.href = "/host/login?reason=expired";
     }
-  }, [hostCode, expectedCode]);
-  // 2. NAVIGATION HELPERS
+  }, [hostCode]);
+
   function navigateToDeckManager() {
     navigate("/host/decks");
   }
@@ -30,8 +23,7 @@ export default function HostHome() {
     navigate("/host/session");
   }
 
-  // 3. RENDER PREVENTER
-  if (!hostCode || hostCode !== expectedCode) return null;
+  if (!hostCode) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-[#0a0523] to-[#0d011c]">

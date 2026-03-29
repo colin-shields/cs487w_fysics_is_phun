@@ -1,9 +1,87 @@
 # CS487W_Fysics_is_Phun
 Fysics is Phun Classroom game
 
-By: Wilson Quilli, Aland Adili, Colin Shields, Jonathan Alavez Reyes, Laurence Orji, Maxym Noyevoy and Matthew Wybranski
+By: Wilson Quilli, Aland Adili, Colin Shields, Jonathan Alavez Reyes, Laurence Orji, Maxym Noyevoy, and Matthew Wybranski
 
-## Project Overview
+### Contents
+- [Usage](https://github.com/AlrJohn/CS487W_Fysics_is_Phun/edit/main/README.md#usage)
+- [Overview](https://github.com/AlrJohn/CS487W_Fysics_is_Phun/edit/main/README.md#overview)
+<hr><br><br>
+
+# Usage
+
+<big>**You can use the latest stable version of the website [here](https://cs487wfysicsisphun.vercel.app).**</big>
+<br><br>
+
+## Hosting Locally
+
+Ensure you have [Python](https://www.python.org/downloads/) and [Node.js](https://nodejs.org/en/download) installed.
+
+### Clone the repository
+```terminal
+git clone https://github.com/AlrJohn/CS487W_Fysics_is_Phun
+cd CS487W_Fysics_is_Phun
+```
+
+### Backend
+
+```terminal
+cd backend
+```
+
+Set up virtual environment:
+```terminal
+python -m venv venv
+```
+
+- On windows: 
+  ```terminal
+  venv\Scripts\activate
+  ```
+- On Linux/macOS:
+  ```terminal
+  source venv/bin/activate
+  ```
+
+Install dependencies:
+```terminal
+pip install -r requirements.txt
+```
+
+Start the app backend:
+```terminal
+uvicorn main:app --reload
+```
+Take note of the address it uses. You may have to specify a port if you are running other applications.
+
+### Frontend
+
+```terminal
+cd ./frontend
+```
+
+Install dependencies:
+```terminal
+npm install
+```
+
+Link to the backend:
+- Create a file in the frontend folder named `.env.local`
+- Using the address that uvicorn used (e.g., `http://127.0.0.1:8080`), paste this into the file:
+  ```terminal
+  VITE_API_BASE_URL=your-address-here
+  ```
+
+Run the app:
+```terminal
+npm run dev
+```
+
+The website should now be running locally on your machine.
+<hr><br><br>
+
+
+# Overview
 Project Type: Web-based classroom game system
 
 Primary Goal: Automate gameplay and scoring with minimal host interaction, while keeping stage progression host-controlled (Host clicks Next).
