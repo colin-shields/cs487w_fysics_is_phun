@@ -23,7 +23,8 @@ function fmtPts(n) {
 export default function PlayerGame() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { roomCode, playerName, playerAvatarUrl } = location.state || {};
+  const { roomCode, playerName, playerAvatarUrl } = location.state ||
+    JSON.parse(sessionStorage.getItem("playerSession") || "null") || {};
 
   const [sessionStatus, setSessionStatus] = useState(null);
   const [error, setError] = useState("");
@@ -32,6 +33,7 @@ export default function PlayerGame() {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(null);
   const wsRef = useRef(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
   // game-specific state
   // phases: submit | waiting | choose | results | juryWaiting
@@ -98,84 +100,100 @@ export default function PlayerGame() {
   useEffect(() => {
     if (!roomCode || sessionCancelled) return;
 
-    const wsUrl = buildWsUrl(`/ws/session/${roomCode}`);
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let ws;
+    let reconnectTimeout;
+    let cancelled = false;
 
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        if (msg.type === "question") {
-          setCurrentQuestionIndex(msg.index);
-          setCurrentQuestion(msg.question);
-          setSessionStatus((prev) => ({
-            ...(prev || {}),
-            status: "in-progress",
-          }));
-          setPhase("submit");
-          setMyFake("");
-          setAnswers([]);
-          setMyChoice(null);
-          setCorrectAnswer(null);
-          setMyRoundBreakdown(null);
-          // reset timer state for the new question
-          setTimerRemaining(null);
-          setTimerPaused(false);
-          setTimerStatus("idle");
-          setStageLocked(false);
-          setHasSubmitted(false);
-          setTimerError(null);
-        } else if (msg.type === "timer_update") {
-          setTimerRemaining(msg.remaining);
-          setTimerPaused(msg.paused);
-          setTimerStatus(msg.status);
-          setStageLocked(msg.status === "paused");
-        } else if (msg.type === "stage_ready") {
-          setStageLocked(true);
-          setTimerStatus("ready");
-        } else if (msg.type === "stage_transition") {
-          // Unlock inputs; only clear timer display when moving to an untimed stage (2→3)
-          setStageLocked(false);
-          if (msg.to_stage === 3) {
-            setTimerStatus("idle");
-            setTimerRemaining(null);
-          }
-        } else if (msg.type === "timer_error") {
-          setTimerError(msg.message);
-          setTimeout(() => setTimerError(null), 3000);
-        } else if (msg.type === "cancelled") {
-          setSessionCancelled(true);
-        } else if (msg.type === "game_finished") {
-          setGameFinished(true);
-        } else if (msg.type === "answers") {
-          setAnswers(msg.answers || []);
-          setPhase("choose");
-        } else if (msg.type === "results") {
-          setCorrectAnswer(msg.correct || "");
-          setPhase("results");
-        } else if (msg.type === "jury_phase") {
-          // Jury is now voting — players wait
-          setPhase("juryWaiting");
-        } else if (msg.type === "round_scores") {
-          const breakdown = msg.breakdown?.[playerName] || {};
-          setMyRoundBreakdown(breakdown);
-          setMyTotalScore(msg.scores?.[playerName] ?? 0);
-          // Stay in results-like phase showing the breakdown
-          setPhase("results");
+    function connect() {
+      const wsUrl = buildWsUrl(`/ws/session/${roomCode}`);
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => setWsConnected(true);
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        if (!cancelled) {
+          reconnectTimeout = setTimeout(connect, 2000);
         }
-      } catch (e) {
-        console.error("Invalid ws msg", e);
-      }
-    };
+      };
 
-    ws.onclose = (e) => console.log("Player ws closed", e.code);
-    ws.onerror = (e) => console.error("Player ws error", e);
+      ws.onerror = () => ws.close();
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type === "question") {
+            setCurrentQuestionIndex(msg.index);
+            setCurrentQuestion(msg.question);
+            setSessionStatus((prev) => ({
+              ...(prev || {}),
+              status: "in-progress",
+            }));
+            setPhase("submit");
+            setMyFake("");
+            setAnswers([]);
+            setMyChoice(null);
+            setCorrectAnswer(null);
+            setMyRoundBreakdown(null);
+            // reset timer state for the new question
+            setTimerRemaining(null);
+            setTimerPaused(false);
+            setTimerStatus("idle");
+            setStageLocked(false);
+            setHasSubmitted(false);
+            setTimerError(null);
+          } else if (msg.type === "timer_update") {
+            setTimerRemaining(msg.remaining);
+            setTimerPaused(msg.paused);
+            setTimerStatus(msg.status);
+            setStageLocked(msg.status === "paused");
+          } else if (msg.type === "stage_ready") {
+            setStageLocked(true);
+            setTimerStatus("ready");
+          } else if (msg.type === "stage_transition") {
+            // Unlock inputs; only clear timer display when moving to an untimed stage (2→3)
+            setStageLocked(false);
+            if (msg.to_stage === 3) {
+              setTimerStatus("idle");
+              setTimerRemaining(null);
+            }
+          } else if (msg.type === "timer_error") {
+            setTimerError(msg.message);
+            setTimeout(() => setTimerError(null), 3000);
+          } else if (msg.type === "cancelled") {
+            setSessionCancelled(true);
+          } else if (msg.type === "game_finished") {
+            setGameFinished(true);
+          } else if (msg.type === "answers") {
+            setAnswers(msg.answers || []);
+            setPhase("choose");
+          } else if (msg.type === "results") {
+            setCorrectAnswer(msg.correct || "");
+            setPhase("results");
+          } else if (msg.type === "jury_phase") {
+            // Jury is now voting — players wait
+            setPhase("juryWaiting");
+          } else if (msg.type === "round_scores") {
+            const breakdown = msg.breakdown?.[playerName] || {};
+            setMyRoundBreakdown(breakdown);
+            setMyTotalScore(msg.scores?.[playerName] ?? 0);
+            // Stay in results-like phase showing the breakdown
+            setPhase("results");
+          }
+        } catch (e) {
+          console.error("Invalid ws msg", e);
+        }
+      };
+    }
+
+    connect();
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      cancelled = true;
+      clearTimeout(reconnectTimeout);
+      wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [roomCode, sessionCancelled]);
 
@@ -635,11 +653,19 @@ export default function PlayerGame() {
                 Connection
               </div> */}
               <div className="flex items-center justify-center gap-2">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-purple-500"></span>
+                <span className="relative flex h-2.5 w-2.5">
+                  {wsConnected ? (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500"></span>
+                    </>
+                  ) : (
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-pink-500"></span>
+                  )}
                 </span>
-                <span className="text-white font-medium">Connected</span>
+                <span className="text-white font-medium">
+                  {wsConnected ? "Connected" : "Reconnecting..."}
+                </span>
               </div>
             </div>
           </div>

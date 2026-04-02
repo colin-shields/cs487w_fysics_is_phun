@@ -41,12 +41,12 @@ export default function JuryHome() {
         return;
       }
 
-      navigate("/jury/vote", {
-        state: {
-          roomCode: roomCode.trim().toUpperCase(),
-          jurorName: jurorName.trim(),
-        },
-      });
+      const sessionData = {
+        roomCode: roomCode.trim().toUpperCase(),
+        jurorName: jurorName.trim(),
+      };
+      sessionStorage.setItem("jurorSession", JSON.stringify(sessionData));
+      navigate("/jury/vote", { state: sessionData });
     } catch (err) {
       setError(err.message || "Unknown error");
       setBusy(false);

@@ -51,14 +51,14 @@ export default function PlayerJoin() {
 
       const assignedAvatarUrl = res?.data?.avatar_url || selectedAvatarUrl;
 
-      // Success: navigate to player waiting/game view
-      navigate("/player/game", {
-        state: {
-          roomCode: roomCode.trim().toUpperCase(),
-          playerName: playerName.trim(),
-          playerAvatarUrl: assignedAvatarUrl,
-        },
-      });
+      // Success: persist session so refresh doesn't lose identity
+      const sessionData = {
+        roomCode: roomCode.trim().toUpperCase(),
+        playerName: playerName.trim(),
+        playerAvatarUrl: assignedAvatarUrl,
+      };
+      sessionStorage.setItem("playerSession", JSON.stringify(sessionData));
+      navigate("/player/game", { state: sessionData });
     } catch (err) {
       setError(err.message || "Unknown error");
       setBusy(false);

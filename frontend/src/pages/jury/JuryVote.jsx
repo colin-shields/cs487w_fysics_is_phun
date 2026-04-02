@@ -24,7 +24,8 @@ import { buildWsUrl, httpGet } from "../../api/httpClient";
 export default function JuryVote() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { roomCode, jurorName } = location.state || {};
+  const { roomCode, jurorName } = location.state ||
+    JSON.parse(sessionStorage.getItem("jurorSession") || "null") || {};
 
   const wsRef = useRef(null);
 
@@ -84,17 +85,26 @@ export default function JuryVote() {
   useEffect(() => {
     if (!roomCode) return;
 
-    const ws = new WebSocket(buildWsUrl(`/ws/session/${roomCode}`));
-    wsRef.current = ws;
+    let ws;
+    let reconnectTimeout;
+    let cancelled = false;
 
-    ws.onopen = () => setWsConnected(true);
-    ws.onclose = () => setWsConnected(false);
+    function connect() {
+      ws = new WebSocket(buildWsUrl(`/ws/session/${roomCode}`));
+      wsRef.current = ws;
 
-    ws.onerror = (e) => {
-      console.error("Jury ws error", e);
-    };
+      ws.onopen = () => setWsConnected(true);
 
-    ws.onmessage = (evt) => {
+      ws.onclose = () => {
+        setWsConnected(false);
+        if (!cancelled) {
+          reconnectTimeout = setTimeout(connect, 2000);
+        }
+      };
+
+      ws.onerror = () => ws.close();
+
+      ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
 
@@ -188,12 +198,15 @@ export default function JuryVote() {
         // ignore parse errors
       }
     };
+    }
+
+    connect();
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      cancelled = true;
+      clearTimeout(reconnectTimeout);
+      wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [roomCode]);
 

@@ -49,7 +49,20 @@ export default function HostGame() {
   const [timerStatus, setTimerStatus] = useState("idle"); // "running" | "paused" | "ready" | "idle"
   const [currentStage, setCurrentStage] = useState(null);
   const [stageReadyReason, setStageReadyReason] = useState(null);
+  const [wsSendError, setWsSendError] = useState(false);
   const wsRef = React.useRef(null);
+
+  // Helper: send over WS, flag error if not connected
+  function wsSend(payload) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(payload));
+      setWsSendError(false);
+      return true;
+    }
+    setWsSendError(true);
+    setTimeout(() => setWsSendError(false), 3000);
+    return false;
+  }
 
   useEffect(() => {
     if (!activeDeck) { navigate("/host"); return; }
@@ -58,13 +71,27 @@ export default function HostGame() {
 
   useEffect(() => {
     if (!roomCode) return;
-    const wsUrl = buildWsUrl(`/ws/session/${roomCode}`);
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
 
-    ws.onopen = () => setWsConnected(true);
-    ws.onclose = () => console.log("Host websocket closed");
-    ws.onmessage = (evt) => {
+    let ws;
+    let reconnectTimeout;
+    let cancelled = false;
+
+    function connect() {
+      ws = new WebSocket(buildWsUrl(`/ws/session/${roomCode}`));
+      wsRef.current = ws;
+
+      ws.onopen = () => setWsConnected(true);
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        if (!cancelled) {
+          reconnectTimeout = setTimeout(connect, 2000);
+        }
+      };
+
+      ws.onerror = () => ws.close();
+
+      ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
         console.log("Received message:", msg.type, msg);
@@ -105,9 +132,14 @@ export default function HostGame() {
         // ignore
       }
     };
+    }
+
+    connect();
 
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      cancelled = true;
+      clearTimeout(reconnectTimeout);
+      wsRef.current?.close();
       wsRef.current = null;
     };
   }, [roomCode]);
@@ -126,14 +158,12 @@ export default function HostGame() {
   const currentQuestion = questions[currentQuestionIndex] || {};
 
   function sendCurrentQuestion() {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "question",
-        index: currentQuestionIndex,
-        question: currentQuestion,
-        correctAnswer: currentQuestion.Correct_Answer,
-      }));
-    }
+    wsSend({
+      type: "question",
+      index: currentQuestionIndex,
+      question: currentQuestion,
+      correctAnswer: currentQuestion.Correct_Answer,
+    });
   }
 
   useEffect(() => {
@@ -164,48 +194,36 @@ export default function HostGame() {
   }
 
   function sendHostNext(stage) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "host_next", stage }));
-      console.log("Sent host_next for stage", stage);
+    if (wsSend({ type: "host_next", stage })) {
       setStageReadyReason(null);
     }
   }
 
   function sendPause() {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "pause" }));
-    }
+    wsSend({ type: "pause" });
   }
 
   function sendResume() {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "resume" }));
-    }
+    wsSend({ type: "resume" });
   }
 
   function sendExtendTimer() {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "extend_timer" }));
-    }
+    wsSend({ type: "extend_timer" });
   }
 
   function sendSkipQuestion() {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "skip_question" }));
-    }
+    wsSend({ type: "skip_question" });
   }
 
   function requestResults() {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      // Release the Stage 2 READY gate first, then request stats
-      wsRef.current.send(JSON.stringify({ type: "host_next", stage: 2 }));
-      wsRef.current.send(JSON.stringify({ type: "results_request" }));
+    // Release the Stage 2 READY gate first, then request stats
+    if (wsSend({ type: "host_next", stage: 2 })) {
+      wsSend({ type: "results_request" });
     }
   }
 
   function startJuryPhase() {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "jury_phase", question_index: currentQuestionIndex }));
+    if (wsSend({ type: "jury_phase", question_index: currentQuestionIndex })) {
       setPhase("jury");
     }
   }
@@ -217,9 +235,7 @@ export default function HostGame() {
   }
 
   async function onEndGame() {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "game_finished" }));
-    }
+    wsSend({ type: "game_finished" });
     navigate("/host/leaderboard", { state: { roomCode } });
   }
 
@@ -265,6 +281,18 @@ export default function HostGame() {
           </div>
         </div>
       </header>
+
+      {/* Disconnect banner — shown when WebSocket drops, auto-hides on reconnect */}
+      {!wsConnected && (
+        <div className="bg-pink-950/90 border-b border-pink-500/40 px-6 py-2 text-sm font-bold text-pink-200 text-center">
+          Connection lost — reconnecting automatically...
+        </div>
+      )}
+      {wsSendError && (
+        <div className="bg-amber-950/90 border-b border-amber-500/40 px-6 py-2 text-sm font-bold text-amber-200 text-center">
+          Action failed — not connected. Waiting to reconnect...
+        </div>
+      )}
 
       <main className="mx-auto w-full max-w-5xl px-4 py-8 space-y-6 flex-grow flex flex-col">
 

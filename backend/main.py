@@ -157,6 +157,7 @@ async def create_session(request: SessionRequest):
         "current_stage": None,            # 1 | 2 | 3 | None
         "stage_status": "idle",           # "running" | "paused" | "ready" | "idle"
         "current_answers_shuffled": [],   # shuffled answer list, stored for reconnect resync
+        "jury_phase_active": False,        # True while jury is voting (used for reconnect resync)
     }
     
     return {"room_code": room_code}
@@ -257,11 +258,18 @@ async def cancel_session(room_code: str, _ok: bool = Depends(require_host)):
 import asyncio
 
 async def _broadcast(code: str, msg: dict):
-    """Send a JSON message to all WebSocket connections in a room."""
+    """Send a JSON message to all WebSocket connections in a room.
+    Removes any connections that fail to receive the message."""
+    dead = []
     for ws in session_sockets.get(code, [])[:]:
         try:
             await ws.send_json(msg)
         except Exception:
+            dead.append(ws)
+    for ws in dead:
+        try:
+            session_sockets[code].remove(ws)
+        except ValueError:
             pass
 
 async def _cancel_timer(code: str):
@@ -392,6 +400,9 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     "stage": sess.get("current_stage"),
                     "reason": "reconnect",
                 })
+            # 5. if jury phase is active, resend jury_phase so reconnecting jurors can vote
+            if sess.get("jury_phase_active") and sess.get("jury_phase_payload"):
+                await websocket.send_json(sess["jury_phase_payload"])
 
     try:
         while True:
@@ -409,14 +420,18 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 active_sessions[code]["stage_status"] = "idle"
                 active_sessions[code]["current_answers_shuffled"] = []
                 # broadcast to all peers except sender
+                dead = []
                 for ws in session_sockets.get(code, [])[:]:
                     if ws is websocket:
                         continue
                     try:
                         await ws.send_json(msg)
-                    except WebSocketDisconnect:
-                        session_sockets[code].remove(ws)
                     except Exception:
+                        dead.append(ws)
+                for ws in dead:
+                    try:
+                        session_sockets[code].remove(ws)
+                    except ValueError:
                         pass
                 # start Stage 1 timer
                 await _start_stage(code, 1)
@@ -565,17 +580,11 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 enable_worst_fake = active_sessions[code].get("enable_worst_fake", False)
                 total_jurors = len(active_sessions[code].get("jurors", []))
                 payload = {"type": "jury_phase", "fakes": fakes, "enable_worst_fake": enable_worst_fake}
-                for ws in session_sockets.get(code, [])[:]:
-                    try:
-                        await ws.send_json(payload)
-                    except Exception:
-                        pass
+                active_sessions[code]["jury_phase_active"] = True
+                active_sessions[code]["jury_phase_payload"] = payload  # cache for reconnect resync
+                await _broadcast(code, payload)
                 # Broadcast initial jury vote progress (0/N) so host displays total jurors immediately
-                for ws in session_sockets.get(code, [])[:]:
-                    try:
-                        await ws.send_json({"type": "jury_vote_count", "count": 0, "total_jurors": total_jurors})
-                    except Exception:
-                        pass
+                await _broadcast(code, {"type": "jury_vote_count", "count": 0, "total_jurors": total_jurors})
             elif msg.get("type") == "jury_vote":
                 # a juror submitted their vote
                 idx = active_sessions[code].get("current_index")
@@ -674,6 +683,9 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 # store breakdown
                 active_sessions[code].setdefault("round_breakdown", {})[idx] = breakdown
 
+                # jury voting is over
+                active_sessions[code]["jury_phase_active"] = False
+                active_sessions[code]["jury_phase_payload"] = None
                 # broadcast round_scores to all
                 scores_snapshot = dict(active_sessions[code]["scores"])
                 payload = {
@@ -682,11 +694,7 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     "scores": scores_snapshot,
                     "correct_answer": correct,
                 }
-                for ws in session_sockets.get(code, [])[:]:
-                    try:
-                        await ws.send_json(payload)
-                    except Exception:
-                        pass
+                await _broadcast(code, payload)
             elif msg.get("type") == "pause":
                 sess = active_sessions[code]
                 if sess.get("stage_status") == "running":
