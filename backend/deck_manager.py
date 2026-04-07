@@ -51,13 +51,15 @@ def validate_and_parse_csv(file_path: str):
 def zip_deck(deck_path, zip_path):
     deck = pd.read_csv(deck_path)
     imgs = pd.unique(deck['Image_Link'])
+    imgs = [img for img in imgs if pd.notna(img)]  # Remove NaN values
     imgs = [f"assets/{img}" for img in imgs]
     files_to_zip = imgs + [deck_path]
-
     with ZipFile(zip_path, 'w', compression=ZIP_DEFLATED) as zipf:
         for file in files_to_zip:
             zipf.write(file)
             # print(f"added {file}")    # debug
+        
+
 
 
 def extract_deck(zip_path):
