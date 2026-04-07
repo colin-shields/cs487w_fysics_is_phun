@@ -12,12 +12,30 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useDeck } from "../../state/DeckContext.jsx";
 import { buildUrl, buildWsUrl } from "../../api/httpClient";
 import { getHostCode } from "../../utils/hostAuth";
+import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
 
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
   if (imagePath.startsWith("/assets/")) return buildUrl(imagePath);
   if (imagePath.startsWith("http")) return imagePath;
   return buildUrl(`/assets/${imagePath}`);
+}
+
+function getAvatarUrl(imagePath) {
+  if (!imagePath) return "";
+  const normalized = String(imagePath).trim();
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://") ||
+    normalized.startsWith("data:") ||
+    normalized.startsWith("blob:")
+  ) {
+    return normalized;
+  }
+  if (normalized.startsWith("/")) {
+    return normalized;
+  }
+  return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
 }
 
 function fmtPts(n) {
@@ -43,6 +61,7 @@ export default function HostGame() {
   const [totalJurors, setTotalJurors] = useState(0);
   const [roundBreakdown, setRoundBreakdown] = useState(null);
   const [currentScores, setCurrentScores] = useState({});
+  const [autoProgress, setAutoProgress] = useState(false);
   // Timer / stage state
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [timerPaused, setTimerPaused] = useState(false);
@@ -50,7 +69,11 @@ export default function HostGame() {
   const [currentStage, setCurrentStage] = useState(null);
   const [stageReadyReason, setStageReadyReason] = useState(null);
   const [wsSendError, setWsSendError] = useState(false);
+  const [hostAvatarUrl, setHostAvatarUrl] = useState("");
+  const [fallbackHostAvatarUrl] = useState(() => pickRandomPlayerAvatarUrl());
   const wsRef = React.useRef(null);
+  const displayHostAvatarUrl =
+    getAvatarUrl(hostAvatarUrl) || getAvatarUrl(fallbackHostAvatarUrl);
 
   // Helper: send over WS, flag error if not connected
   function wsSend(payload) {
@@ -60,13 +83,19 @@ export default function HostGame() {
       return true;
     }
     setWsSendError(true);
-    setTimeout(() => setWsSendError(false), 3000);
+    setTimeout(() => setWsSendError(false), 4800);
     return false;
   }
 
   useEffect(() => {
-    if (!activeDeck) { navigate("/host"); return; }
-    if (!roomCode) { navigate("/host/lobby"); return; }
+    if (!activeDeck) {
+      navigate("/host");
+      return;
+    }
+    if (!roomCode) {
+      navigate("/host/lobby");
+      return;
+    }
   }, [activeDeck, roomCode, navigate]);
 
   useEffect(() => {
@@ -92,46 +121,46 @@ export default function HostGame() {
       ws.onerror = () => ws.close();
 
       ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        console.log("Received message:", msg.type, msg);
-        if (msg.type === "submission") {
-          setSubmissions((prev) => [...prev, msg.player]);
-        } else if (msg.type === "answers") {
-          setAnswerPool(msg.answers || []);
-          setPhase("answers");
-        } else if (msg.type === "results") {
-          setResultStats(msg.stats);
-          setPhase("results");
-        } else if (msg.type === "jury_vote_count") {
-          setJuryVoteCount(msg.count);
-          setTotalJurors(msg.total_jurors);
-        } else if (msg.type === "round_scores") {
-          setRoundBreakdown(msg.breakdown || {});
-          setCurrentScores(msg.scores || {});
-          setPhase("roundLeaderboard");
-        } else if (msg.type === "timer_update") {
-          setTimerRemaining(msg.remaining);
-          setTimerPaused(msg.paused);
-          setTimerStatus(msg.status);
-          setCurrentStage(msg.stage);
-        } else if (msg.type === "stage_ready") {
-          setTimerStatus("ready");
-          setStageReadyReason(msg.reason);
-        } else if (msg.type === "stage_transition") {
-          // Only clear the ready banner — phase changes are driven by subsequent messages
-          // (e.g. "answers" msg sets phase="answers", "results" msg sets phase="results")
-          setStageReadyReason(null);
-          setTimerStatus("idle");
-        } else if (msg.type === "skip_question") {
-          setCurrentQuestionIndex((prev) =>
-            prev < totalQuestions - 1 ? prev + 1 : prev
-          );
+        try {
+          const msg = JSON.parse(evt.data);
+          console.log("Received message:", msg.type, msg);
+          if (msg.type === "submission") {
+            setSubmissions((prev) => [...prev, msg.player]);
+          } else if (msg.type === "answers") {
+            setAnswerPool(msg.answers || []);
+            setPhase("answers");
+          } else if (msg.type === "results") {
+            setResultStats(msg.stats);
+            setPhase("results");
+          } else if (msg.type === "jury_vote_count") {
+            setJuryVoteCount(msg.count);
+            setTotalJurors(msg.total_jurors);
+          } else if (msg.type === "round_scores") {
+            setRoundBreakdown(msg.breakdown || {});
+            setCurrentScores(msg.scores || {});
+            setPhase("roundLeaderboard");
+          } else if (msg.type === "timer_update") {
+            setTimerRemaining(msg.remaining);
+            setTimerPaused(msg.paused);
+            setTimerStatus(msg.status);
+            setCurrentStage(msg.stage);
+          } else if (msg.type === "stage_ready") {
+            setTimerStatus("ready");
+            setStageReadyReason(msg.reason);
+          } else if (msg.type === "stage_transition") {
+            // Only clear the ready banner — phase changes are driven by subsequent messages
+            // (e.g. "answers" msg sets phase="answers", "results" msg sets phase="results")
+            setStageReadyReason(null);
+            setTimerStatus("idle");
+          } else if (msg.type === "skip_question") {
+            setCurrentQuestionIndex((prev) =>
+              prev < totalQuestions - 1 ? prev + 1 : prev,
+            );
+          }
+        } catch (e) {
+          // ignore
         }
-      } catch (e) {
-        // ignore
-      }
-    };
+      };
     }
 
     connect();
@@ -142,6 +171,29 @@ export default function HostGame() {
       wsRef.current?.close();
       wsRef.current = null;
     };
+  }, [roomCode]);
+
+  useEffect(() => {
+    if (!roomCode) return;
+
+    async function refreshHostAvatar() {
+      try {
+        const hostCode = getHostCode?.() || "";
+        const headers = hostCode ? { "X-Host-Code": hostCode } : {};
+        const res = await fetch(buildUrl(`/session-status/${roomCode}`), {
+          headers,
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setHostAvatarUrl(data?.player_avatars?.Host || "");
+      } catch {
+        // Keep fallback avatar when status fetch fails.
+      }
+    }
+
+    refreshHostAvatar();
+    const iv = setInterval(refreshHostAvatar, 2000);
+    return () => clearInterval(iv);
   }, [roomCode]);
 
   if (!activeDeck || !roomCode) {
@@ -180,6 +232,46 @@ export default function HostGame() {
     setStageReadyReason(null);
     if (wsConnected) sendCurrentQuestion();
   }, [currentQuestionIndex, wsConnected]);
+
+  // Auto-progress logic: triggers when timerStatus is "ready" or all jurors voted
+  // Updated auto-progress logic
+  useEffect(() => {
+    if (!autoProgress) return;
+
+    let timeout;
+    // Condition: Timer is ready OR all jurors voted OR we are on results/leaderboard
+    const shouldProgress =
+      timerStatus === "ready" ||
+      phase === "results" ||
+      (phase === "jury" && juryVoteCount >= totalJurors && totalJurors > 0) ||
+      phase === "roundLeaderboard";
+
+    if (shouldProgress) {
+      timeout = setTimeout(() => {
+        if (phase === "collecting") {
+          sendHostNext(1);
+        } else if (phase === "answers") {
+          requestResults();
+        } else if (phase === "results") {
+          // New: Automatically trigger Jury phase from Results
+          startJuryPhase();
+        } else if (phase === "jury") {
+          requestJuryResults();
+        } else if (phase === "roundLeaderboard") {
+          if (!isLastQuestion) goToNext();
+        }
+      }, 3000);
+    }
+
+    return () => clearTimeout(timeout);
+  }, [
+    autoProgress,
+    timerStatus,
+    phase,
+    juryVoteCount,
+    totalJurors,
+    isLastQuestion,
+  ]);
 
   function goToPrev() {
     if (currentQuestionIndex > 0) {
@@ -243,7 +335,10 @@ export default function HostGame() {
     try {
       const hostCode = getHostCode?.() || "";
       const headers = hostCode ? { "X-Host-Code": hostCode } : {};
-      await fetch(buildUrl(`/session/${roomCode}`), { method: "DELETE", headers });
+      await fetch(buildUrl(`/session/${roomCode}`), {
+        method: "DELETE",
+        headers,
+      });
     } catch (e) {
       console.warn("Failed to cancel session", e);
     }
@@ -261,16 +356,32 @@ export default function HostGame() {
     <div className="min-h-screen bg-[#050114] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950 via-[#0a0523] to-[#050114] flex flex-col">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-indigo-500/20 bg-[#0a0523]/80 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+        <div className="mx-auto grid max-w-5xl grid-cols-3 items-center px-6 py-4">
           <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">Host View</div>
+            <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">
+              Host View
+            </div>
             <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">
               Game in Progress
             </div>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex justify-center">
+            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
+              <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center">
+                <img
+                  src={displayHostAvatarUrl}
+                  alt="Host avatar"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-6">
             <div className="text-sm font-medium text-indigo-200">
-              Room: <span className="font-bold text-emerald-400 ml-1 tracking-wider">{roomCode}</span>
+              Room:{" "}
+              <span className="font-bold text-emerald-400 ml-1 tracking-wider">
+                {roomCode}
+              </span>
             </div>
             <button
               onClick={onExitGame}
@@ -295,39 +406,55 @@ export default function HostGame() {
       )}
 
       <main className="mx-auto w-full max-w-5xl px-4 py-8 space-y-6 flex-grow flex flex-col">
-
-
         {/* Question Counter */}
         <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/30 backdrop-blur-md p-6 shrink-0 relative overflow-hidden group">
           <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
             <div>
-              <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-1">Question Progress</div>
+              <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-1">
+                Question Progress
+              </div>
               <div className="mt-1 text-3xl font-black text-white tracking-wide">
-                <span className="text-emerald-400">{currentQuestionIndex + 1}</span>
-                <span className="text-indigo-400 font-medium text-xl mx-1">/</span>
+                <span className="text-emerald-400">
+                  {currentQuestionIndex + 1}
+                </span>
+                <span className="text-indigo-400 font-medium text-xl mx-1">
+                  /
+                </span>
                 <span className="text-indigo-200">{totalQuestions}</span>
               </div>
             </div>
             <div className="flex items-center gap-4">
               {/* Phase badge */}
-              <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                phase === "collecting" ? "bg-indigo-900/50 border-indigo-500/40 text-indigo-300" :
-                phase === "answers" ? "bg-purple-900/50 border-purple-500/40 text-purple-300" :
-                phase === "results" ? "bg-emerald-900/50 border-emerald-500/40 text-emerald-300" :
-                phase === "jury" ? "bg-amber-900/50 border-amber-500/40 text-amber-300" :
-                "bg-teal-900/50 border-teal-500/40 text-teal-300"
-              }`}>
-                {phase === "collecting" ? "Collecting Fakes" :
-                 phase === "answers" ? "Players Choosing" :
-                 phase === "results" ? "Results" :
-                 phase === "jury" ? "Jury Voting" :
-                 "Round Scores"}
+              <div
+                className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
+                  phase === "collecting"
+                    ? "bg-indigo-900/50 border-indigo-500/40 text-indigo-300"
+                    : phase === "answers"
+                      ? "bg-purple-900/50 border-purple-500/40 text-purple-300"
+                      : phase === "results"
+                        ? "bg-emerald-900/50 border-emerald-500/40 text-emerald-300"
+                        : phase === "jury"
+                          ? "bg-amber-900/50 border-amber-500/40 text-amber-300"
+                          : "bg-teal-900/50 border-teal-500/40 text-teal-300"
+                }`}
+              >
+                {phase === "collecting"
+                  ? "Collecting Fakes"
+                  : phase === "answers"
+                    ? "Players Choosing"
+                    : phase === "results"
+                      ? "Results"
+                      : phase === "jury"
+                        ? "Jury Voting"
+                        : "Round Scores"}
               </div>
               <div className="w-48 h-3 bg-[#0a0523]/60 border border-indigo-500/30 rounded-full overflow-hidden shadow-inner">
                 <div
                   className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-700 ease-out"
-                  style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
+                  style={{
+                    width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%`,
+                  }}
                 />
               </div>
             </div>
@@ -336,39 +463,45 @@ export default function HostGame() {
           {/* Timer bar — shown during Stage 1 and Stage 2 */}
           {timerRemaining !== null && timerStatus !== "idle" && (
             <div className="mt-4 flex items-center gap-3 relative z-10">
-              <div className={`text-2xl font-black tabular-nums w-20 ${
-                timerStatus === "paused" ? "text-yellow-400" :
-                timerStatus === "ready"  ? "text-amber-400" :
-                timerRemaining <= 10     ? "text-red-400 animate-pulse" :
-                                           "text-white"
-              }`}>
+              <div
+                className={`text-2xl font-black tabular-nums w-20 ${
+                  timerStatus === "paused"
+                    ? "text-yellow-400"
+                    : timerStatus === "ready"
+                      ? "text-amber-400"
+                      : timerRemaining <= 10
+                        ? "text-red-400 animate-pulse"
+                        : "text-white"
+                }`}
+              >
                 {timerStatus === "ready" ? "READY" : `${timerRemaining}s`}
               </div>
-              {(timerStatus === "running" || timerStatus === "paused") && (
-                <div className="flex gap-2">
-                  {timerStatus === "running" ? (
+              {(timerStatus === "running" || timerStatus === "paused") &&
+                currentStage !== 3 && (
+                  <div className="flex gap-2">
+                    {timerStatus === "running" ? (
+                      <button
+                        onClick={sendPause}
+                        className="text-xs px-3 py-1 rounded-lg border border-yellow-500/40 text-yellow-300 hover:bg-yellow-900/40 transition-all"
+                      >
+                        Pause
+                      </button>
+                    ) : (
+                      <button
+                        onClick={sendResume}
+                        className="text-xs px-3 py-1 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40 transition-all"
+                      >
+                        Resume
+                      </button>
+                    )}
                     <button
-                      onClick={sendPause}
-                      className="text-xs px-3 py-1 rounded-lg border border-yellow-500/40 text-yellow-300 hover:bg-yellow-900/40 transition-all"
+                      onClick={sendExtendTimer}
+                      className="text-xs px-3 py-1 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/40 transition-all"
                     >
-                      Pause
+                      +15s
                     </button>
-                  ) : (
-                    <button
-                      onClick={sendResume}
-                      className="text-xs px-3 py-1 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40 transition-all"
-                    >
-                      Resume
-                    </button>
-                  )}
-                  <button
-                    onClick={sendExtendTimer}
-                    className="text-xs px-3 py-1 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/40 transition-all"
-                  >
-                    +15s
-                  </button>
-                </div>
-              )}
+                  </div>
+                )}
             </div>
           )}
         </section>
@@ -400,10 +533,14 @@ export default function HostGame() {
           )}
 
           {/* Correct Answer only (results + jury + roundLeaderboard phases) */}
-          {(phase === "results" || phase === "jury" || phase === "roundLeaderboard") && (
+          {(phase === "results" ||
+            phase === "jury" ||
+            phase === "roundLeaderboard") && (
             <div className="mt-auto mx-auto w-full max-w-sm z-10">
               <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/40 p-5 shadow-[0_0_20px_rgba(16,185,129,0.15)] flex flex-col items-center text-center">
-                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2 bg-emerald-900/40 px-3 py-1 rounded-full border border-emerald-500/30">CORRECT ANSWER</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2 bg-emerald-900/40 px-3 py-1 rounded-full border border-emerald-500/30">
+                  CORRECT ANSWER
+                </div>
                 <div className="text-xl md:text-2xl font-bold text-white">
                   {currentQuestion.Correct_Answer || "(No answer)"}
                 </div>
@@ -419,7 +556,9 @@ export default function HostGame() {
               Stage {currentStage} Complete
             </div>
             <div className="text-sm text-amber-200/70">
-              {stageReadyReason === "timeout" ? "Time expired." : "All players submitted."}{" "}
+              {stageReadyReason === "timeout"
+                ? "Time expired."
+                : "All players submitted."}{" "}
               Use the button below to advance.
             </div>
           </section>
@@ -519,6 +658,20 @@ export default function HostGame() {
             </button>
           )}
 
+          <button
+            onClick={() => setAutoProgress(!autoProgress)}
+            className={`sm:w-auto px-4 py-4 rounded-xl border font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+              autoProgress
+                ? "bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                : "bg-indigo-950/40 border-indigo-500/30 text-indigo-300 hover:border-indigo-400"
+            }`}
+          >
+            <div
+              className={`w-3 h-3 rounded-full ${autoProgress ? "bg-emerald-400 animate-pulse" : "bg-slate-600"}`}
+            ></div>
+            {autoProgress ? "Auto-Progress ON" : "Auto-Progress OFF"}
+          </button>
+
           {phase !== "roundLeaderboard" && (
             <button
               onClick={isLastQuestion ? onEndGame : sendSkipQuestion}
@@ -536,11 +689,19 @@ export default function HostGame() {
         {/* Phase-specific info panels */}
         {phase === "collecting" && (
           <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-5 shadow-inner flex items-center justify-between">
-            <div className="text-sm font-bold text-indigo-200">Waiting for players to submit fakes</div>
+            <div className="text-sm font-bold text-indigo-200">
+              Waiting for players to submit fakes
+            </div>
             <div className="flex -space-x-2">
-              {Array.from({ length: Math.min(submissions.length, 5) }).map((_, i) => (
-                <div key={i} className="w-8 h-8 rounded-full bg-indigo-600 border-2 border-[#0a0523] animate-pulse" style={{ animationDelay: `${i * 150}ms`, zIndex: 10 - i }}></div>
-              ))}
+              {Array.from({ length: Math.min(submissions.length, 5) }).map(
+                (_, i) => (
+                  <div
+                    key={i}
+                    className="w-8 h-8 rounded-full bg-indigo-600 border-2 border-[#0a0523] animate-pulse"
+                    style={{ animationDelay: `${i * 150}ms`, zIndex: 10 - i }}
+                  ></div>
+                ),
+              )}
               {submissions.length > 5 && (
                 <div className="w-8 h-8 rounded-full bg-indigo-800 border-2 border-[#0a0523] flex items-center justify-center text-[10px] font-bold text-white">
                   +{submissions.length - 5}
@@ -558,7 +719,10 @@ export default function HostGame() {
             </div>
             <div className="flex flex-wrap gap-3">
               {answerPool.map((ans, i) => (
-                <div key={i} className="bg-[#0a0523]/60 border border-indigo-500/30 text-indigo-100 px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+                <div
+                  key={i}
+                  className="bg-[#0a0523]/60 border border-indigo-500/30 text-indigo-100 px-4 py-2 rounded-lg text-sm font-medium shadow-sm"
+                >
                   {ans}
                 </div>
               ))}
@@ -576,9 +740,20 @@ export default function HostGame() {
               {Object.entries(resultStats).map(([ans, count]) => {
                 const isCorrect = ans === currentQuestion.Correct_Answer;
                 return (
-                  <div key={ans} className={`flex items-center justify-between p-3 rounded-xl border ${isCorrect ? "border-emerald-500/40 bg-emerald-950/30" : "border-indigo-500/30 bg-[#0a0523]/60"}`}>
-                    <span className={`text-sm font-medium truncate pr-2 ${isCorrect ? "text-emerald-200" : "text-indigo-100"}`}>{ans}</span>
-                    <span className={`text-base font-black px-2 py-0.5 rounded-md ${isCorrect ? "bg-emerald-500/20 text-emerald-300" : "bg-indigo-900/50 text-indigo-300"}`}>{count}</span>
+                  <div
+                    key={ans}
+                    className={`flex items-center justify-between p-3 rounded-xl border ${isCorrect ? "border-emerald-500/40 bg-emerald-950/30" : "border-indigo-500/30 bg-[#0a0523]/60"}`}
+                  >
+                    <span
+                      className={`text-sm font-medium truncate pr-2 ${isCorrect ? "text-emerald-200" : "text-indigo-100"}`}
+                    >
+                      {ans}
+                    </span>
+                    <span
+                      className={`text-base font-black px-2 py-0.5 rounded-md ${isCorrect ? "bg-emerald-500/20 text-emerald-300" : "bg-indigo-900/50 text-indigo-300"}`}
+                    >
+                      {count}
+                    </span>
                   </div>
                 );
               })}
@@ -586,16 +761,19 @@ export default function HostGame() {
           </section>
         )}
 
-        {phase === "jury" && juryVoteCount >= totalJurors && totalJurors > 0 && (
-          <section className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-5 py-3 shrink-0">
-            <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-0.5">
-              All Jurors Voted
-            </div>
-            <div className="text-sm text-emerald-200/70">
-              All {totalJurors} jurors have submitted their votes — ready to show round scores.
-            </div>
-          </section>
-        )}
+        {phase === "jury" &&
+          juryVoteCount >= totalJurors &&
+          totalJurors > 0 && (
+            <section className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-5 py-3 shrink-0">
+              <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-0.5">
+                All Jurors Voted
+              </div>
+              <div className="text-sm text-emerald-200/70">
+                All {totalJurors} jurors have submitted their votes — ready to
+                show round scores.
+              </div>
+            </section>
+          )}
 
         {phase === "jury" && (
           <section className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-6 shadow-inner">
@@ -605,11 +783,20 @@ export default function HostGame() {
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
                   Jury Deliberating
                 </div>
-                <div className="text-sm font-medium text-amber-200/80">Jurors are voting on the best fake answer</div>
+                <div className="text-sm font-medium text-amber-200/80">
+                  Jurors are voting on the best fake answer
+                </div>
               </div>
               <div className="text-right">
-                <div className="text-2xl font-black text-white">{juryVoteCount}<span className="text-amber-400/60 text-base font-medium">/{totalJurors}</span></div>
-                <div className="text-xs font-bold uppercase tracking-wider text-amber-400/60">votes in</div>
+                <div className="text-2xl font-black text-white">
+                  {juryVoteCount}
+                  <span className="text-amber-400/60 text-base font-medium">
+                    /{totalJurors}
+                  </span>
+                </div>
+                <div className="text-xs font-bold uppercase tracking-wider text-amber-400/60">
+                  votes in
+                </div>
               </div>
             </div>
           </section>
@@ -625,28 +812,59 @@ export default function HostGame() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-indigo-500/20">
-                    <th className="text-left py-2 pr-4 text-xs font-bold uppercase tracking-wider text-indigo-400">Player</th>
-                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-emerald-400">Correct</th>
-                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-indigo-400">Fooled</th>
-                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-amber-400">Jury Best</th>
-                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-pink-400">Jury Worst</th>
-                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-teal-300">Round</th>
-                    <th className="text-right py-2 pl-4 text-xs font-bold uppercase tracking-wider text-white">Total</th>
+                    <th className="text-left py-2 pr-4 text-xs font-bold uppercase tracking-wider text-indigo-400">
+                      Player
+                    </th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-emerald-400">
+                      Correct
+                    </th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
+                      Fooled
+                    </th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-amber-400">
+                      Jury Best
+                    </th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-pink-400">
+                      Jury Worst
+                    </th>
+                    <th className="text-center py-2 px-2 text-xs font-bold uppercase tracking-wider text-teal-300">
+                      Round
+                    </th>
+                    <th className="text-right py-2 pl-4 text-xs font-bold uppercase tracking-wider text-white">
+                      Total
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedLeaderboard.map((p, idx) => (
-                    <tr key={p.name} className={`border-b border-indigo-500/10 ${idx === 0 ? "bg-emerald-950/20" : ""}`}>
+                    <tr
+                      key={p.name}
+                      className={`border-b border-indigo-500/10 ${idx === 0 ? "bg-emerald-950/20" : ""}`}
+                    >
                       <td className="py-3 pr-4 font-bold text-white flex items-center gap-2">
-                        {idx === 0 && <span className="text-emerald-400 text-xs">★</span>}
+                        {idx === 0 && (
+                          <span className="text-emerald-400 text-xs">★</span>
+                        )}
                         {p.name === "Predefined Fake" ? "Host" : p.name}
                       </td>
-                      <td className="text-center py-3 px-2 text-emerald-300 font-mono">{fmtPts(p.correct_pts)}</td>
-                      <td className="text-center py-3 px-2 text-indigo-300 font-mono">{fmtPts(p.fool_pts)}</td>
-                      <td className="text-center py-3 px-2 text-amber-300 font-mono">{fmtPts(p.jury_best_pts)}</td>
-                      <td className="text-center py-3 px-2 text-pink-300 font-mono">{fmtPts(p.jury_worst_pts ? -p.jury_worst_pts : 0)}</td>
-                      <td className="text-center py-3 px-2 font-black text-teal-300 font-mono">{fmtPts(p.round_total)}</td>
-                      <td className="text-right py-3 pl-4 font-black text-white">{Math.round((p.total ?? 0) * 100) / 100} pts</td>
+                      <td className="text-center py-3 px-2 text-emerald-300 font-mono">
+                        {fmtPts(p.correct_pts)}
+                      </td>
+                      <td className="text-center py-3 px-2 text-indigo-300 font-mono">
+                        {fmtPts(p.fool_pts)}
+                      </td>
+                      <td className="text-center py-3 px-2 text-amber-300 font-mono">
+                        {fmtPts(p.jury_best_pts)}
+                      </td>
+                      <td className="text-center py-3 px-2 text-pink-300 font-mono">
+                        {fmtPts(p.jury_worst_pts ? -p.jury_worst_pts : 0)}
+                      </td>
+                      <td className="text-center py-3 px-2 font-black text-teal-300 font-mono">
+                        {fmtPts(p.round_total)}
+                      </td>
+                      <td className="text-right py-3 pl-4 font-black text-white">
+                        {Math.round((p.total ?? 0) * 100) / 100} pts
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -659,7 +877,8 @@ export default function HostGame() {
         <section className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/40 p-5 mt-auto opacity-70 hover:opacity-100 transition-opacity">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="text-sm font-medium text-indigo-200">
-              Deck: <span className="text-white font-bold">{activeDeck.name}</span>
+              Deck:{" "}
+              <span className="text-white font-bold">{activeDeck.name}</span>
             </div>
           </div>
         </section>

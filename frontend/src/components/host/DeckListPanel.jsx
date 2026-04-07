@@ -17,6 +17,8 @@ import {
   listDecksApi,
   getDeckDetailApi,
   deleteDeckApi,
+  extractDeckApi,
+  zipDeckApi,
 } from "../../api/decks.js";
 import { useDeck } from "../../state/DeckContext.jsx";
 import { buildUrl } from "../../api/httpClient";
@@ -51,12 +53,69 @@ export default function DeckListPanel() {
   const [imageErrors, setImageErrors] = useState({}); // track failed image loads
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isZipUploadOpen, setIsZipUploadOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingDeck, setEditingDeck] = useState(null);
+  const [zipFile, setZipFile] = useState(null);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipError, setZipError] = useState("");
 
   async function handleUploadSuccess() {
     setIsUploadOpen(false); // Close the popup
     await loadDecks(); // Refresh the list from the backend
+  }
+
+  async function handleZipUploadSuccess() {
+    setIsZipUploadOpen(false);
+    setZipFile(null);
+    setZipError("");
+    await loadDecks();
+  }
+
+  async function onUploadZip() {
+    if (!zipFile) {
+      setZipError("Please choose a .deck.zip file to upload.");
+      return;
+    }
+
+    setZipBusy(true);
+    setZipError("");
+
+    const response = await extractDeckApi(zipFile);
+    if (!response.ok) {
+      setZipError(response.error || response.data?.detail || `Upload failed (${response.status})`);
+      setZipBusy(false);
+      return;
+    }
+
+    await handleZipUploadSuccess();
+    setZipBusy(false);
+  }
+
+  async function onDownloadZip(deck) {
+    if (!deck?.deck_id) return;
+    setBusy(true);
+    setError("");
+
+    const response = await zipDeckApi(deck.deck_id);
+    if (!response.ok || !response.data) {
+      setError(response.error || `Failed to create zip (${response.status})`);
+      setBusy(false);
+      return;
+    }
+
+    const blob = response.data;
+    const downloadName = deck.deck_id.replace(/\.csv$/i, ".deck");
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+
+    setBusy(false);
   }
 
   async function loadDecks() {
@@ -235,10 +294,10 @@ export default function DeckListPanel() {
             + Create Deck
           </button>
           <button
-            onClick={() => setIsUploadOpen(true)}
+            onClick={() => setIsZipUploadOpen(true)}
             className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
           >
-            ↑ Upload CSV
+            ↑ Upload Deck
           </button>
           <button
             onClick={loadDecks}
@@ -247,6 +306,13 @@ export default function DeckListPanel() {
           >
             {busy ? "Refreshing..." : "Refresh"}
           </button>
+          {/* </div><div>
+          <button
+            onClick={() => setIsUploadOpen(true)}
+            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+          >
+            <small>↑ Import from CSV</small>
+          </button> */}
         </div>
       </div>
 
@@ -273,6 +339,58 @@ export default function DeckListPanel() {
           onSuccess={() => handleUploadSuccess()}
           existingDecks={decks} // <--- PASS THE DECKS HERE
         />
+      </Modal>
+
+      <Modal
+        isOpen={isZipUploadOpen}
+        onClose={() => {
+          setIsZipUploadOpen(false);
+          setZipFile(null);
+          setZipError("");
+        }}
+        title="Upload Deck"
+      >
+        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <div className="mt-5 grid gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                .deck File
+              </label>
+              <input
+                type="file"
+                accept=".deck"
+                onChange={(e) => setZipFile(e.target.files?.[0] || null)}
+                className="block w-full text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-100"
+              />
+            </div>
+
+            {zipError && (
+              <div className="rounded-lg border border-rose-900/60 bg-rose-950/40 p-3 text-sm text-rose-200">
+                {zipError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3">
+              <button
+                onClick={onUploadZip}
+                disabled={!zipFile || zipBusy}
+                className="rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {zipBusy ? "Uploading..." : "Upload"}
+              </button>
+              <button
+                onClick={() => {
+                  setIsZipUploadOpen(false);
+                  setZipFile(null);
+                  setZipError("");
+                }}
+                className="rounded-lg bg-slate-700 px-6 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-600"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </section>
       </Modal>
 
       <Modal
@@ -321,9 +439,8 @@ export default function DeckListPanel() {
               return (
                 <div
                   key={deck?.deck_id || idx}
-                  className={`rounded-lg border bg-slate-950/30 p-4 ${
-                    isSelected ? "border-indigo-500" : "border-slate-800"
-                  }`}
+                  className={`rounded-lg border bg-slate-950/30 p-4 ${isSelected ? "border-indigo-500" : "border-slate-800"
+                    }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <button
@@ -344,11 +461,10 @@ export default function DeckListPanel() {
                         onClick={() => onSetActive(deck)}
                         disabled={activeDeck?.deckId === deck?.deck_id || busy}
                         className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors
-    ${
-      activeDeck?.deckId === deck?.deck_id
-        ? "bg-emerald-600 text-white cursor-default" // Active is now Green
-        : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
-    }`}
+    ${activeDeck?.deckId === deck?.deck_id
+                            ? "bg-emerald-600 text-white cursor-default" // Active is now Green
+                            : "bg-slate-700 text-slate-200 hover:bg-slate-600" // Inactive is now Grey
+                          }`}
                         title={
                           activeDeck?.deckId === deck?.deck_id
                             ? "This is the current active deck"
@@ -360,7 +476,7 @@ export default function DeckListPanel() {
                           : "Set Active"}
                       </button>
 
-                      <button
+                      {/* <button
                         onClick={() => onDownloadBackup(deck)}
                         disabled={busy}
                         className="rounded-lg bg-indigo-600 px-2.5 py-2 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors flex items-center justify-center"
@@ -380,8 +496,29 @@ export default function DeckListPanel() {
                             d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                           />
                         </svg>
-                      </button>
+                      </button> */}
 
+                      <button
+                        onClick={() => onDownloadZip(deck)}
+                        disabled={busy}
+                        className="rounded-lg bg-indigo-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+                        title="Download Deck"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                          />
+                        </svg>
+                      </button>
                       <button
                         onClick={() => onEditDeck(deck)}
                         disabled={busy}
@@ -397,7 +534,7 @@ export default function DeckListPanel() {
                         className="rounded-lg bg-rose-600 px-2 py-2 text-xs font-semibold text-white hover:bg-rose-500"
                         title="Delete this deck"
                       >
-                        &times;
+                        &#10005;
                       </button>
                     </div>
                   </div>

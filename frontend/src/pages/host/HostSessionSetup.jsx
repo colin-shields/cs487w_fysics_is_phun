@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useDeck } from "../../state/DeckContext.jsx";
 import { httpPostJson } from "../../api/httpClient";
 import { getHostCode } from "../../utils/hostAuth";
+import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
 
 const DEFAULTS = {
   stage1Seconds: 60,
@@ -25,6 +26,7 @@ export default function HostSessionSetup() {
   const [enableWorstFake, setEnableWorstFake] = useState(
     DEFAULTS.enableWorstFake,
   );
+  const [hostAvatarUrl] = useState(() => pickRandomPlayerAvatarUrl());
 
   const [busyCreating, setBusyCreating] = useState(false);
   const [creationError, setCreationError] = useState("");
@@ -43,6 +45,7 @@ export default function HostSessionSetup() {
           enable_worst_fake: enableWorstFake,
           stage1_duration: stage1Seconds,
           stage2_duration: stage2Seconds,
+          host_avatar_url: hostAvatarUrl,
         },
         headers,
       );

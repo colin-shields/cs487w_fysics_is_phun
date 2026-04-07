@@ -10,7 +10,7 @@
  * - etc.
  */
 
-import { httpGet, httpPostForm, httpPostJson, httpDelete, httpPutJson } from "./httpClient";
+import { httpGet, httpPostForm, httpPostJson, httpDelete, httpPutJson, buildUrl } from "./httpClient";
 import { getHostCode } from "../utils/hostAuth";
 
 /**
@@ -106,4 +106,48 @@ export async function uploadAsset(file) {
   formData.append("file", file);
 
   return httpPostForm("/upload-asset", formData, hostHeaders());
+}
+
+/**
+ * Extract a .deck zip file into a usable deck
+ */
+export async function extractDeckApi(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return httpPostForm("/extract-deck", formData, hostHeaders());
+}
+
+/**
+ * Zip a deck into a .deck zip file
+ */
+export async function zipDeckApi(deckFilename, zipFilename = "") {
+  const payload = { deck_filename: deckFilename };
+  if (zipFilename) payload.zip_filename = zipFilename;
+
+  const url = buildUrl("/zip-deck");
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...hostHeaders(),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const blob = await res.blob();
+    if (!res.ok) {
+      let errorText = "Unknown error";
+      try {
+        errorText = await blob.text();
+      } catch (e) {
+        errorText = String(e);
+      }
+      return { ok: false, status: res.status, data: null, error: errorText };
+    }
+
+    return { ok: true, status: res.status, data: blob };
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: err?.message || String(err) };
+  }
 }

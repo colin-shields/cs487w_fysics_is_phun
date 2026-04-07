@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from zipfile import ZipFile, ZIP_DEFLATED
 
 REQUIRED_COLUMNS = ['Question_ID', 'Question_Text', 'Correct_Answer', 'Predefined_Fake']
 #image_link is optional but if provided must be valid
@@ -45,3 +46,20 @@ def validate_and_parse_csv(file_path: str):
     except Exception as e:
         # This will now capture the EXACT line that failed
         return {"status": "error", "message": f"Parser Error: {str(e)}"}
+
+
+def zip_deck(deck_path, zip_path):
+    deck = pd.read_csv(deck_path)
+    imgs = pd.unique(deck['Image_Link'])
+    imgs = [f"assets/{img}" for img in imgs]
+    files_to_zip = imgs + [deck_path]
+
+    with ZipFile(zip_path, 'w', compression=ZIP_DEFLATED) as zipf:
+        for file in files_to_zip:
+            zipf.write(file)
+            # print(f"added {file}")    # debug
+
+
+def extract_deck(zip_path):
+    with ZipFile(zip_path, 'r', compression=ZIP_DEFLATED) as zipf:
+        zipf.extractall()

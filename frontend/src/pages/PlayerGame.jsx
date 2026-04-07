@@ -6,12 +6,28 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { buildUrl, buildWsUrl } from "../api/httpClient";
+import { pickRandomPlayerAvatarUrl } from "../utils/playerAvatars";
 
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
-  if (imagePath.startsWith("/assets/")) return buildUrl(imagePath);
-  if (imagePath.startsWith("http")) return imagePath;
-  return buildUrl(`/assets/${imagePath}`);
+  const normalized = String(imagePath).trim();
+
+  // Keep already-resolved URLs untouched.
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://") ||
+    normalized.startsWith("data:") ||
+    normalized.startsWith("blob:")
+  ) {
+    return normalized;
+  }
+
+  // Preserve absolute app paths like /assets/... (prod) and /src/assets/... (dev).
+  if (normalized.startsWith("/")) {
+    return normalized;
+  }
+
+  return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
 }
 
 function fmtPts(n) {
@@ -23,8 +39,10 @@ function fmtPts(n) {
 export default function PlayerGame() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { roomCode, playerName, playerAvatarUrl } = location.state ||
-    JSON.parse(sessionStorage.getItem("playerSession") || "null") || {};
+  const { roomCode, playerName, playerAvatarUrl } =
+    location.state ||
+    JSON.parse(sessionStorage.getItem("playerSession") || "null") ||
+    {};
 
   const [sessionStatus, setSessionStatus] = useState(null);
   const [error, setError] = useState("");
@@ -48,19 +66,27 @@ export default function PlayerGame() {
   const [myTotalScore, setMyTotalScore] = useState(null);
   const [myRoundBreakdown, setMyRoundBreakdown] = useState(null);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
+  const [fallbackAvatarUrl] = useState(() => pickRandomPlayerAvatarUrl());
 
   // timer / stage state
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [timerPaused, setTimerPaused] = useState(false);
   const [timerStatus, setTimerStatus] = useState("idle"); // "running" | "paused" | "ready" | "idle"
-  const [stageLocked, setStageLocked] = useState(false);  // true when stage ended or paused
+  const [stageLocked, setStageLocked] = useState(false); // true when stage ended or paused
   const [hasSubmitted, setHasSubmitted] = useState(false); // true after first fake submit
-  const [timerError, setTimerError] = useState(null);      // server-sent rejection message
+  const [timerError, setTimerError] = useState(null); // server-sent rejection message
 
   const syncedAvatarUrl =
     playerAvatarUrl || sessionStatus?.player_avatars?.[playerName] || "";
   const resolvedAvatarUrl = getImageUrl(syncedAvatarUrl);
-  const showPlayerAvatar = !!resolvedAvatarUrl && !avatarLoadError;
+  const displayAvatarUrl =
+    resolvedAvatarUrl && !avatarLoadError
+      ? resolvedAvatarUrl
+      : getImageUrl(fallbackAvatarUrl);
+
+  useEffect(() => {
+    setAvatarLoadError(false);
+  }, [resolvedAvatarUrl]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -279,13 +305,25 @@ export default function PlayerGame() {
         {scoreBadge}
         <header className="border-b border-indigo-900/50 bg-[#0a0523]/80 backdrop-blur sticky top-0 z-10 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
           <div className="mx-auto max-w-2xl px-6 py-4">
-            <div className="flex items-center justify-between">
+            <div className="grid grid-cols-3 items-center">
               <div>
                 <div className="text-xs text-indigo-300 uppercase tracking-wider font-semibold">
                   Room Code
                 </div>
                 <div className="text-2xl font-bold text-purple-400 drop-shadow-[0_0_5px_rgba(168,85,247,0.4)]">
                   {roomCode}
+                </div>
+              </div>
+              <div className="flex justify-center">
+                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
+                  <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center text-white text-sm font-bold">
+                    <img
+                      src={displayAvatarUrl}
+                      alt={`${playerName} avatar`}
+                      className="h-full w-full object-cover"
+                      onError={() => setAvatarLoadError(true)}
+                    />
+                  </div>
                 </div>
               </div>
               <div className="text-right">
@@ -337,15 +375,22 @@ export default function PlayerGame() {
 
             {/* Timer countdown — shown during Stage 1 and Stage 2 */}
             {timerRemaining !== null && timerStatus !== "idle" && (
-              <div className={`mb-4 px-4 py-2 rounded-xl text-center font-black text-2xl tabular-nums ${
-                timerStatus === "paused" ? "text-yellow-400 bg-yellow-950/30 border border-yellow-500/20" :
-                timerStatus === "ready"  ? "text-amber-400 bg-amber-950/30 border border-amber-500/20" :
-                timerRemaining <= 10     ? "text-red-400 bg-red-950/30 border border-red-500/20 animate-pulse" :
-                                           "text-white bg-indigo-950/30 border border-indigo-500/20"
-              }`}>
-                {timerStatus === "ready"  ? "Waiting for host..." :
-                 timerStatus === "paused" ? `Paused — ${timerRemaining}s` :
-                 `${timerRemaining}s`}
+              <div
+                className={`mb-4 px-4 py-2 rounded-xl text-center font-black text-2xl tabular-nums ${
+                  timerStatus === "paused"
+                    ? "text-yellow-400 bg-yellow-950/30 border border-yellow-500/20"
+                    : timerStatus === "ready"
+                      ? "text-amber-400 bg-amber-950/30 border border-amber-500/20"
+                      : timerRemaining <= 10
+                        ? "text-red-400 bg-red-950/30 border border-red-500/20 animate-pulse"
+                        : "text-white bg-indigo-950/30 border border-indigo-500/20"
+                }`}
+              >
+                {timerStatus === "ready"
+                  ? "Waiting for host..."
+                  : timerStatus === "paused"
+                    ? `Paused — ${timerRemaining}s`
+                    : `${timerRemaining}s`}
               </div>
             )}
 
@@ -433,31 +478,37 @@ export default function PlayerGame() {
             {/* Choose phase */}
             {phase === "choose" && (
               <div className="mt-8 space-y-4">
-                {answers.map((ans, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      if (myChoice || stageLocked) return;
-                      setMyChoice(ans);
-                      if (
-                        wsRef.current &&
-                        wsRef.current.readyState === WebSocket.OPEN
-                      ) {
-                        wsRef.current.send(
-                          JSON.stringify({
-                            type: "choice",
-                            player: playerName,
-                            answer: ans,
-                          }),
-                        );
-                      }
-                    }}
-                    disabled={!!myChoice || stageLocked}
-                    className={`w-full rounded-xl border ${myChoice === ans ? "border-purple-500 bg-purple-900/40 shadow-[0_0_15px_rgba(168,85,247,0.3)]" : "border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 hover:border-purple-400"} px-6 py-4 text-lg font-semibold text-white transition-all disabled:opacity-70`}
-                  >
-                    {ans}
-                  </button>
-                ))}
+                {answers
+                  /* FILTER: Remove the answer that matches what this 
+         specific player typed earlier in the 'submit' phase. 
+      */
+                  .filter((ans) => ans !== myFake)
+                  .map((ans, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        if (myChoice || stageLocked) return;
+                        setMyChoice(ans);
+                        if (
+                          wsRef.current &&
+                          wsRef.current.readyState === WebSocket.OPEN
+                        ) {
+                          wsRef.current.send(
+                            JSON.stringify({
+                              type: "choice",
+                              player: playerName,
+                              answer: ans,
+                            }),
+                          );
+                        }
+                      }}
+                      disabled={!!myChoice || stageLocked}
+                      className={`w-full rounded-xl border ${myChoice === ans ? "border-purple-500 bg-purple-900/40 shadow-[0_0_15px_rgba(168,85,247,0.3)]" : "border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 hover:border-purple-400"} px-6 py-4 text-lg font-semibold text-white transition-all disabled:opacity-70`}
+                    >
+                      {ans}
+                    </button>
+                  ))}
+
                 {myChoice && (
                   <div className="mt-4 flex flex-col items-center justify-center space-y-3">
                     <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-purple-500 rounded-full animate-spin"></div>
@@ -595,16 +646,12 @@ export default function PlayerGame() {
             <div className="flex justify-center">
               <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
                 <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center text-white text-sm font-bold">
-                  {showPlayerAvatar ? (
-                    <img
-                      src={resolvedAvatarUrl}
-                      alt={`${playerName} avatar`}
-                      className="h-full w-full object-cover"
-                      onError={() => setAvatarLoadError(true)}
-                    />
-                  ) : (
-                    playerName?.charAt(0).toUpperCase() || "?"
-                  )}
+                  <img
+                    src={displayAvatarUrl}
+                    alt={`${playerName} avatar`}
+                    className="h-full w-full object-cover"
+                    onError={() => setAvatarLoadError(true)}
+                  />
                 </div>
               </div>
             </div>

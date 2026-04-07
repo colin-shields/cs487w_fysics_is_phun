@@ -1,3 +1,7 @@
+# Backend testing
+backend/test.py
+backend/test/
+
 # Assets (user stored)
 backend/assets/
 

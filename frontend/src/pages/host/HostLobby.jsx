@@ -5,13 +5,6 @@ import { getHostCode } from "../../utils/hostAuth";
 import playerQr from "../../assets/player_qr.png";
 import juryQr from "../../assets/jury_qr.png";
 
-function getAvatarUrl(imagePath) {
-  if (!imagePath) return "";
-  if (imagePath.startsWith("/assets/")) return buildUrl(imagePath);
-  if (imagePath.startsWith("http")) return imagePath;
-  return buildUrl(`/assets/${imagePath}`);
-}
-
 export default function HostLobby() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -19,7 +12,6 @@ export default function HostLobby() {
 
   const [players, setPlayers] = useState([]);
   const [playerAvatars, setPlayerAvatars] = useState({});
-  const [avatarLoadErrors, setAvatarLoadErrors] = useState({});
   const [jurors, setJurors] = useState([]);
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
@@ -133,14 +125,33 @@ export default function HostLobby() {
           <div className="mt-6 text-sm font-medium text-indigo-200/70">
             Share this code with players to join
           </div>
-          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-8">
-            <div className="flex flex-col items-center gap-2">
-              <img src={playerQr} alt="Player join QR code" className="w-36 h-36 rounded-xl border border-indigo-500/30 shadow-md bg-white p-2" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-300/70">Player Join</span>
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-evenly gap-10 px-6">
+            {/* Player QR Wrapper */}
+            <div className="flex flex-col items-center gap-4 w-full sm:w-1/4 max-w-[220px]">
+              <div className="relative w-full pt-[100%] group">
+                <img
+                  src={playerQr}
+                  alt="Player join QR code"
+                  className="absolute top-0 left-0 w-full h-full rounded-xl border border-indigo-500/40 shadow-lg bg-white p-[6%] transition-transform hover:scale-105"
+                />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-widest text-indigo-300/90">
+                Player Join
+              </span>
             </div>
-            <div className="flex flex-col items-center gap-2">
-              <img src={juryQr} alt="Jury join QR code" className="w-36 h-36 rounded-xl border border-indigo-500/30 shadow-md bg-white p-2" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-300/70">Jury Join</span>
+
+            {/* Jury QR Wrapper */}
+            <div className="flex flex-col items-center gap-4 w-full sm:w-1/4 max-w-[220px]">
+              <div className="relative w-full pt-[100%] group">
+                <img
+                  src={juryQr}
+                  alt="Jury join QR code"
+                  className="absolute top-0 left-0 w-full h-full rounded-xl border border-indigo-500/40 shadow-lg bg-white p-[6%] transition-transform hover:scale-105"
+                />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-widest text-indigo-300/90">
+                Jury Join
+              </span>
             </div>
           </div>
         </section>
@@ -193,22 +204,11 @@ export default function HostLobby() {
                   >
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
                       <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center text-white text-xs font-bold">
-                        {getAvatarUrl(playerAvatars[n]) &&
-                        !avatarLoadErrors[n] ? (
-                          <img
-                            src={getAvatarUrl(playerAvatars[n])}
-                            alt={`${n} avatar`}
-                            className="h-full w-full object-cover"
-                            onError={() =>
-                              setAvatarLoadErrors((prev) => ({
-                                ...prev,
-                                [n]: true,
-                              }))
-                            }
-                          />
-                        ) : (
-                          n.charAt(0).toUpperCase()
-                        )}
+                        <img
+                          src={playerAvatars[n] || ""}
+                          alt={`${n} avatar`}
+                          className="h-full w-full object-cover"
+                        />
                       </div>
                     </div>
                     <span className="truncate">{n}</span>

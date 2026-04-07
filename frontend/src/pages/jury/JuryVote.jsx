@@ -45,6 +45,14 @@ export default function JuryVote() {
   const [scoreSnapshot, setScoreSnapshot] = useState(null); // optional
   const [playerAvatars, setPlayerAvatars] = useState({});
 
+  const JURY_TIMER_SECONDS = 60;
+
+  // Timer / stage state
+  const [timerRemaining, setTimerRemaining] = useState(null);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const [timerStatus, setTimerStatus] = useState("idle"); // "running" | "paused" | "ready" | "idle"
+  const [voteClosed, setVoteClosed] = useState(false);
+
   // Vote state
   const [bestSelectedPlayer, setBestSelectedPlayer] = useState(null);
   const [worstSelectedPlayer, setWorstSelectedPlayer] = useState(null);
@@ -127,6 +135,10 @@ export default function JuryVote() {
           // clear old round context
           setCorrectAnswer(null);
           setScoreSnapshot(null);
+          setTimerRemaining(JURY_TIMER_SECONDS);
+          setTimerPaused(false);
+          setTimerStatus("running");
+          setVoteClosed(false);
 
           refreshPlayerAvatars(roomCode);
           setPhase("voting");
@@ -147,6 +159,10 @@ export default function JuryVote() {
 
           setCorrectAnswer(null);
           setScoreSnapshot(null);
+          setTimerRemaining(null);
+          setTimerPaused(false);
+          setTimerStatus("idle");
+          setVoteClosed(false);
 
           setPhase("waiting");
           return;
@@ -179,17 +195,20 @@ export default function JuryVote() {
           return;
         }
 
-        // Timer/stage messages — passive handling for future Stage 3 timer support
+        // Timer/stage messages — show countdown during jury voting and waiting
         if (msg.type === "timer_update") {
-          // Future: display a countdown during jury phase when a jury timer is added
+          setTimerRemaining(msg.remaining ?? null);
+          setTimerPaused(Boolean(msg.paused));
+          setTimerStatus(msg.status || "idle");
           return;
         }
         if (msg.type === "stage_ready") {
-          // Future: handle jury stage_ready when Stage 3 is timed
+          setTimerStatus("ready");
           return;
         }
         if (msg.type === "stage_transition") {
-          // Future: react to stage transitions (e.g., timer starts for jury phase)
+          setTimerStatus("idle");
+          setTimerRemaining(null);
           return;
         }
 
@@ -209,6 +228,26 @@ export default function JuryVote() {
       wsRef.current = null;
     };
   }, [roomCode]);
+
+  useEffect(() => {
+    if (phase !== "voting" || timerStatus !== "running") return;
+
+    const interval = setInterval(() => {
+      setTimerRemaining((prev) => {
+        if (prev === null) return null;
+        if (prev <= 1) {
+          setTimerStatus("idle");
+          setVoteClosed(true);
+          setPhase("waiting");
+          setSubmitStatus("Jury voting closed. Waiting for host.");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [phase, timerStatus]);
 
   useEffect(() => {
     if (phase !== "submitted") return;
@@ -414,11 +453,34 @@ export default function JuryVote() {
             <div className="text-lg font-bold text-white mb-2">
               Waiting for jury phase{waitingDots}
             </div>
+            {timerRemaining !== null && timerStatus !== "idle" && (
+              <div className={`mx-auto mt-4 max-w-xs rounded-2xl px-4 py-3 text-sm font-black text-center tabular-nums ${
+                timerStatus === "paused"
+                  ? "text-yellow-300 bg-yellow-950/20 border border-yellow-500/20"
+                  : timerStatus === "ready"
+                  ? "text-amber-300 bg-amber-950/20 border border-amber-500/20"
+                  : timerRemaining <= 10
+                  ? "text-red-300 bg-red-950/20 border border-red-500/20 animate-pulse"
+                  : "text-white bg-indigo-950/20 border border-indigo-500/20"
+              }`}>
+                {timerStatus === "ready"
+                  ? "Waiting for host..."
+                  : timerStatus === "paused"
+                  ? `Paused — ${timerRemaining}s`
+                  : `${timerRemaining}s`}
+              </div>
+            )}
             <div className="text-sm text-indigo-300/60">
               {wsConnected
                 ? "Connected — voting opens when the host starts jury voting."
                 : "Not connected. Check your room code."}
             </div>
+
+            {voteClosed && (
+              <div className="mt-4 rounded-2xl border border-pink-500/30 bg-pink-950/20 px-4 py-3 text-sm font-semibold text-pink-200">
+                Jury voting has closed. Waiting for the host to advance.
+              </div>
+            )}
 
             {currentQuestion && (
               <div className="mt-8 mx-auto max-w-2xl rounded-xl border border-indigo-500/20 bg-[#0a0523]/70 p-5 text-left">
@@ -650,6 +712,24 @@ export default function JuryVote() {
         {/* VOTING */}
         {phase === "voting" && (
           <>
+            {timerRemaining !== null && timerStatus !== "idle" && (
+              <div className={`rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-4 text-center font-black text-lg tabular-nums ${
+                timerStatus === "paused"
+                  ? "text-yellow-300"
+                  : timerStatus === "ready"
+                  ? "text-amber-300"
+                  : timerRemaining <= 10
+                  ? "text-red-300 animate-pulse"
+                  : "text-white"
+              }`}>
+                {timerStatus === "ready"
+                  ? "Waiting for host..."
+                  : timerStatus === "paused"
+                  ? `Paused — ${timerRemaining}s`
+                  : `${timerRemaining}s`}
+              </div>
+            )}
+
             {/* Best Fake */}
             <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/30 p-8 backdrop-blur-md shadow-inner">
               <div className="mb-6 border-b border-indigo-500/20 pb-4">

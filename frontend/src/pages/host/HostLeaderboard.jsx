@@ -14,8 +14,12 @@ import { buildUrl } from "../../api/httpClient";
 import confetti from "canvas-confetti";
 import { useDeck } from "../../state/DeckContext.jsx";
 import ResultViewer from "./ResultViewer";
+import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
 
 export default function HostLeaderboard() {
+  const FIRST_PLACE_REVEAL_DURATION_MS = 2800;
+  const CONFETTI_AFTER_REVEAL_BUFFER_MS = 200;
+
   const location = useLocation();
   const navigate = useNavigate();
   const { roomCode } = location.state || {};
@@ -24,12 +28,88 @@ export default function HostLeaderboard() {
   const [submissions, setSubmissions] = useState({});
   const [choices, setChoices] = useState({});
   const [scores, setScores] = useState({});
+  const [playerAvatars, setPlayerAvatars] = useState({});
+  const [fallbackAvatars, setFallbackAvatars] = useState({});
+  const [revealedPlacements, setRevealedPlacements] = useState({});
   const [showPrettyResults, setShowPrettyResults] = useState(false);
   const [roundBreakdown, setRoundBreakdown] = useState({});
   const { activeDeck } = useDeck();
+  const podiumAnimatedRef = React.useRef(false);
+  const confettiPlayedRef = React.useRef(false);
+
+  function getPlacementTheme(index) {
+    if (index === 0) {
+      return {
+        row: "border-yellow-400/50 bg-yellow-950/20 shadow-[0_0_18px_rgba(250,204,21,0.2)]",
+        avatar: "from-yellow-300 to-yellow-500",
+        watermark: "text-yellow-300/15",
+      };
+    }
+    if (index === 1) {
+      return {
+        row: "border-slate-300/50 bg-slate-400/10 shadow-[0_0_14px_rgba(203,213,225,0.2)]",
+        avatar: "from-slate-200 to-slate-400",
+        watermark: "text-slate-200/15",
+      };
+    }
+    if (index === 2) {
+      return {
+        row: "border-[#cd7f32]/60 bg-[#cd7f32]/10 shadow-[0_0_14px_rgba(205,127,50,0.25)]",
+        avatar: "from-[#e2a76f] to-[#cd7f32]",
+        watermark: "text-[#e2a76f]/20",
+      };
+    }
+    return {
+      row: "border-indigo-500/20 bg-indigo-950/40",
+      avatar: "from-indigo-500 to-purple-600",
+      watermark: "text-indigo-300/10",
+    };
+  }
+
+  function getRevealDurationClass(index) {
+    if (index === 0) return "duration-[2800ms]";
+    if (index === 1 || index === 2) return "duration-[1500ms]";
+    return "duration-700";
+  }
+
+  function getRevealStateClass(index, isRevealed) {
+    if (!isRevealed) {
+      if (index === 0) return "opacity-0 translate-y-14 scale-[0.72] blur-2xl rotate-[-3deg]";
+      if (index === 1 || index === 2) return "opacity-0 translate-y-3 scale-[0.98] blur-sm";
+      return "opacity-100";
+    }
+
+    if (index === 0) {
+      return "opacity-100 translate-y-0 scale-100 blur-0 rotate-0 ring-2 ring-yellow-300/60 shadow-[0_0_70px_rgba(250,204,21,0.45)]";
+    }
+    return "opacity-100 translate-y-0 scale-100 blur-0";
+  }
+
+  function resolveAvatarUrl(imagePath) {
+    if (!imagePath) return "";
+    const normalized = String(imagePath).trim();
+    if (
+      normalized.startsWith("http://") ||
+      normalized.startsWith("https://") ||
+      normalized.startsWith("data:") ||
+      normalized.startsWith("blob:")
+    ) {
+      return normalized;
+    }
+    if (normalized.startsWith("/")) {
+      return normalized;
+    }
+    return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
+  }
 
   function displayName(raw) {
     return raw === "Predefined Fake" ? "Host" : raw;
+  }
+
+  function formatScore(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0";
+    return String(Math.round(n * 100) / 100);
   }
 
   function buildSessionResults(submissions, choices, scores, roundBreakdown) {
@@ -206,6 +286,7 @@ export default function HostLeaderboard() {
           const sortedPlayers = scoreboard.sort((a, b) => b[1] - a[1]);
 
           setPlayers(sortedPlayers);
+          setPlayerAvatars(data.player_avatars || {});
           setChoices(data.choices || {});
           setSubmissions(data.submissions || {});
           setScores(data.scores || {});
@@ -223,9 +304,67 @@ export default function HostLeaderboard() {
     return () => clearInterval(interval);
   }, [roomCode, navigate]);
 
+  useEffect(() => {
+    setRevealedPlacements({});
+    podiumAnimatedRef.current = false;
+    confettiPlayedRef.current = false;
+  }, [roomCode]);
+
   // Confetti effect
   useEffect(() => {
-    if (!loading && players.length > 0) {
+    setFallbackAvatars((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const player of players) {
+        const playerName = player[0] || player.name;
+        if (playerName && !next[playerName]) {
+          next[playerName] = pickRandomPlayerAvatarUrl();
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [players]);
+
+  useEffect(() => {
+    if (loading || players.length === 0 || podiumAnimatedRef.current) return;
+
+    const revealOrder = [2, 1, 0].filter((i) => i < players.length);
+    const revealStartDelayMs = 600;
+    const revealStepDelayMs = 1200;
+    const timers = [];
+
+    revealOrder.forEach((placementIndex, orderIndex) => {
+      const revealAt = revealStartDelayMs + orderIndex * revealStepDelayMs;
+
+      timers.push(
+        setTimeout(() => {
+          setRevealedPlacements((prev) => ({ ...prev, [placementIndex]: true }));
+        }, revealAt),
+      );
+    });
+
+    podiumAnimatedRef.current = true;
+
+    return () => timers.forEach((t) => clearTimeout(t));
+  }, [loading, players.length, roomCode]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      players.length === 0 ||
+      !revealedPlacements[0] ||
+      confettiPlayedRef.current
+    ) {
+      return;
+    }
+
+    confettiPlayedRef.current = true;
+
+    let interval;
+    const confettiTimeout = setTimeout(() => {
       const count = 200;
       const defaults = {
         origin: { y: 0.7 },
@@ -253,7 +392,7 @@ export default function HostLeaderboard() {
       const duration = 15 * 1000;
       const animationEnd = Date.now() + duration;
 
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         const timeLeft = animationEnd - Date.now();
 
         if (timeLeft <= 0) {
@@ -280,10 +419,13 @@ export default function HostLeaderboard() {
           colors: ["#10b981", "#6366f1"],
         });
       }, 300);
+    }, FIRST_PLACE_REVEAL_DURATION_MS + CONFETTI_AFTER_REVEAL_BUFFER_MS);
 
-      return () => clearInterval(interval);
-    }
-  }, [loading, players.length]);
+    return () => {
+      clearTimeout(confettiTimeout);
+      if (interval) clearInterval(interval);
+    };
+  }, [loading, players.length, revealedPlacements]);
 
   function onReturnHome() {
     navigate("/host");
@@ -312,31 +454,13 @@ export default function HostLeaderboard() {
       </header>
 
       {/* Main */}
-      <main className="mx-auto w-full max-w-4xl px-4 py-8 flex-grow">
+      <main className="mx-auto w-full max-w-4xl px-4 py-5 flex-grow">
         <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 backdrop-blur-md shadow-[0_0_40px_rgba(139,92,246,0.1)] p-8 md:p-12 relative overflow-hidden group">
           <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-indigo-500/5 to-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
 
           <h1 className="text-4xl md:text-5xl font-black text-center mb-10 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)] tracking-tight">
             Game Finished!
           </h1>
-
-          {players.length > 0 ? (
-            <div className="mb-12 text-center relative">
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl"></div>
-              <div className="inline-block relative z-10">
-                <div className="text-xs font-black uppercase tracking-[0.3em] text-emerald-400 mb-2 drop-shadow-md">
-                  ★ Champion ★
-                </div>
-                <div className="text-2xl md:text-3xl font-bold text-white px-8 py-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/40 shadow-[0_0_30px_rgba(16,185,129,0.2)] backdrop-blur-sm">
-                  {displayName(players[0].name || players[0][0] || "Unknown Player")}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="text-center text-indigo-300 font-medium mb-10 text-lg">
-              Thank you for playing!
-            </p>
-          )}
 
           {loading ? (
             <div className="text-center text-indigo-300 flex flex-col items-center justify-center py-8">
@@ -378,21 +502,27 @@ export default function HostLeaderboard() {
                   {players.map((player, idx) => (
                     <div
                       key={idx}
-                      className="rounded-xl bg-indigo-950/40 border border-indigo-500/20 p-4 flex items-center justify-between transition-all hover:bg-indigo-900/40 shadow-inner group"
+                      className={`relative overflow-hidden rounded-xl border p-4 flex items-center justify-between transition-all ${getRevealDurationClass(idx)} shadow-inner group ${getPlacementTheme(idx).row} ${idx < 3 ? getRevealStateClass(idx, !!revealedPlacements[idx]) : "opacity-100"}`}
                     >
+                      {idx === 0 && revealedPlacements[idx] && (
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(250,204,21,0.22),transparent_62%)]" />
+                      )}
+                      {idx < 3 && (
+                        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center text-7xl font-black tracking-tight ${getPlacementTheme(idx).watermark}`}>
+                          {idx + 1}
+                        </div>
+                      )}
                       <div className="flex items-center gap-4">
-                        <div
-                          className={`h-12 w-12 rounded-full flex items-center justify-center text-sm font-black shadow-md ${
-                            idx === 0
-                              ? "bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-[0_0_15px_rgba(52,211,153,0.4)] border border-emerald-300"
-                              : idx === 1
-                                ? "bg-gradient-to-br from-slate-300 to-slate-500 text-slate-900 shadow-[0_0_10px_rgba(203,213,225,0.3)] border border-slate-300"
-                                : idx === 2
-                                  ? "bg-gradient-to-br from-amber-600 to-orange-800 text-amber-100 shadow-[0_0_10px_rgba(217,119,6,0.3)] border border-amber-600"
-                                  : "bg-[#0a0523]/80 text-indigo-300 border border-indigo-500/40"
-                          }`}
-                        >
-                          #{idx + 1}
+                        <div className={`h-12 w-12 rounded-full bg-gradient-to-br ${getPlacementTheme(idx).avatar} p-[2px] shadow-md`}>
+                          <img
+                            src={
+                              resolveAvatarUrl(
+                                playerAvatars[player[0] || player.name],
+                              ) || resolveAvatarUrl(fallbackAvatars[player[0] || player.name])
+                            }
+                            alt={`${displayName(player[0] || player.name || "Unknown Player")} avatar`}
+                            className="h-full w-full rounded-full object-cover bg-[#0a0523]"
+                          />
                         </div>
                         <div
                           className={`font-bold tracking-wide ${idx === 0 ? "text-xl text-white drop-shadow-sm" : "text-lg text-indigo-100"}`}
@@ -401,7 +531,7 @@ export default function HostLeaderboard() {
                         </div>
                       </div>
                       <div className="text-xs font-bold uppercase text-indigo-400/50 group-hover:text-indigo-400 transition-colors">
-                        {player[1] !== undefined ? `${player[1]} pts` : ""}
+                        {player[1] !== undefined ? `${formatScore(player[1])} pts` : ""}
                       </div>
                     </div>
                   ))}

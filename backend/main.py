@@ -1,10 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Header, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Header, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
-from deck_manager import validate_and_parse_csv
+from deck_manager import validate_and_parse_csv, zip_deck, extract_deck
 from generate_game_summary import generate_excel_report
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from typing import List, Optional
@@ -126,6 +126,8 @@ class SessionRequest(BaseModel):
     enable_worst_fake: bool = False
     stage1_duration: int = 60
     stage2_duration: int = 45
+    stage3_duration: int = 60
+    host_avatar_url: Optional[str] = None
 
 @app.post("/create-session")
 async def create_session(request: SessionRequest):
@@ -134,10 +136,12 @@ async def create_session(request: SessionRequest):
     
     room_code = str(uuid.uuid4())[:4].upper()
     
+    host_avatar_url = (request.host_avatar_url or "").strip()
+
     active_sessions[room_code] = {
         "deck_id": deck_id,
         "players": [],
-        "player_avatars": {},
+        "player_avatars": {"Host": host_avatar_url} if host_avatar_url else {},
         "jurors": [],
         "status": "lobby",
         "enable_worst_fake": request.enable_worst_fake,
@@ -151,6 +155,7 @@ async def create_session(request: SessionRequest):
         # Timer/stage fields
         "stage1_duration": request.stage1_duration,
         "stage2_duration": request.stage2_duration,
+        "stage3_duration": request.stage3_duration,
         "timer_task": None,               # asyncio.Task | None
         "timer_remaining": 0,             # int seconds remaining
         "timer_paused": False,            # bool
@@ -347,7 +352,12 @@ async def _start_stage(code: str, stage: int):
     sess = active_sessions.get(code)
     if not sess:
         return
-    duration = sess["stage1_duration"] if stage == 1 else sess["stage2_duration"]
+    if stage == 1:
+        duration = sess["stage1_duration"]
+    elif stage == 2:
+        duration = sess["stage2_duration"]
+    elif stage == 3:
+        duration = sess["stage3_duration"]
     sess["timer_task"] = asyncio.create_task(_run_stage_timer(code, stage, duration))
 
 
@@ -585,23 +595,27 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 await _broadcast(code, payload)
                 # Broadcast initial jury vote progress (0/N) so host displays total jurors immediately
                 await _broadcast(code, {"type": "jury_vote_count", "count": 0, "total_jurors": total_jurors})
+                # Start the jury voting timer (stage 3)
+                await _start_stage(code, 3)
             elif msg.get("type") == "jury_vote":
-                # a juror submitted their vote
-                idx = active_sessions[code].get("current_index")
-                juror_name = msg.get("juror_name", "").strip()
-                best = msg.get("best_fake_player")
-                worst = msg.get("worst_fake_player")
-                if juror_name:
-                    jury_votes = active_sessions[code].setdefault("jury_votes", {})
-                    jury_votes.setdefault(idx, {})[juror_name] = {"best": best, "worst": worst}
-                    # broadcast vote count to all (host uses it to track progress)
-                    total_jurors = len(active_sessions[code].get("jurors", []))
-                    vote_count = len(jury_votes.get(idx, {}))
-                    for ws in session_sockets.get(code, [])[:]:
-                        try:
-                            await ws.send_json({"type": "jury_vote_count", "count": vote_count, "total_jurors": total_jurors})
-                        except Exception:
-                            pass
+                # a juror submitted their vote — only accept if jury phase is still running
+                sess = active_sessions[code]
+                if sess.get("jury_phase_active") and sess.get("stage_status") == "running" and sess.get("current_stage") == 3:
+                    idx = sess.get("current_index")
+                    juror_name = msg.get("juror_name", "").strip()
+                    best = msg.get("best_fake_player")
+                    worst = msg.get("worst_fake_player")
+                    if juror_name:
+                        jury_votes = sess.setdefault("jury_votes", {})
+                        jury_votes.setdefault(idx, {})[juror_name] = {"best": best, "worst": worst}
+                        # broadcast vote count to all (host uses it to track progress)
+                        total_jurors = len(sess.get("jurors", []))
+                        vote_count = len(jury_votes.get(idx, {}))
+                        for ws in session_sockets.get(code, [])[:]:
+                            try:
+                                await ws.send_json({"type": "jury_vote_count", "count": vote_count, "total_jurors": total_jurors})
+                            except Exception:
+                                pass
             elif msg.get("type") == "jury_results":
                 # host requests jury scoring — compute fractional points and broadcast round_scores
                 idx = active_sessions[code].get("current_index")
@@ -697,7 +711,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 await _broadcast(code, payload)
             elif msg.get("type") == "pause":
                 sess = active_sessions[code]
-                if sess.get("stage_status") == "running":
+                # Only allow pause for stages 1 and 2, not for jury (stage 3)
+                if sess.get("stage_status") == "running" and sess.get("current_stage") in (1, 2):
                     sess["timer_paused"] = True
                     sess["stage_status"] = "paused"
                     await _broadcast(code, {
@@ -709,7 +724,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     })
             elif msg.get("type") == "resume":
                 sess = active_sessions[code]
-                if sess.get("stage_status") == "paused":
+                # Only allow resume for stages 1 and 2, not for jury (stage 3)
+                if sess.get("stage_status") == "paused" and sess.get("current_stage") in (1, 2):
                     sess["timer_paused"] = False
                     sess["stage_status"] = "running"
                     await _broadcast(code, {
@@ -721,7 +737,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     })
             elif msg.get("type") == "extend_timer":
                 sess = active_sessions[code]
-                if sess.get("stage_status") in ("running", "paused"):
+                # Only allow extend for stages 1 and 2, not for jury (stage 3)
+                if sess.get("stage_status") in ("running", "paused") and sess.get("current_stage") in (1, 2):
                     sess["timer_remaining"] = sess.get("timer_remaining", 0) + 15
                     await _broadcast(code, {
                         "type": "timer_update",
@@ -872,5 +889,49 @@ async def upload_asset(file: UploadFile = File(...), _ok: bool = Depends(require
 class HostLoginRequest(BaseModel):
     host_code: str
 
+class ZipDeckRequest(BaseModel):
+    deck_filename: str
+    zip_filename: Optional[str] = None
+
+@app.post("/zip-deck")
+async def api_zip_deck(
+    request: ZipDeckRequest,
+    background_tasks: BackgroundTasks,
+    _ok: bool = Depends(require_host),
+):
+    """Create a .deck zip file containing the deck CSV and referenced images."""
+    deck_path = os.path.join("decks", request.deck_filename)
+    if not os.path.isfile(deck_path):
+        raise HTTPException(status_code=404, detail="Deck file not found")
+
+    zip_filename = request.zip_filename or f"{os.path.splitext(request.deck_filename)[0]}.deck"
+    zip_path = os.path.join("decks", zip_filename)
+
+    try:
+        zip_deck(deck_path, zip_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to zip deck: {str(e)}")
+
+    background_tasks.add_task(os.remove, zip_path)
+    return FileResponse(path=zip_path, filename=zip_filename, media_type="application/zip")
+
+@app.post("/extract-deck")
+async def api_extract_deck(file: UploadFile = File(...), _ok: bool = Depends(require_host)):
+    """Extract a .deck zip file uploaded by the user."""
+    if not file.filename.lower().endswith(".deck"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a .deck file")
+
+    zip_path = os.path.join("decks", file.filename)
+    with open(zip_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        extract_deck(zip_path)
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=f"Failed to extract deck: {str(e)}")
+
+    os.remove(zip_path)
+    return {"status": "success", "extracted_from": file.filename}
 
 
