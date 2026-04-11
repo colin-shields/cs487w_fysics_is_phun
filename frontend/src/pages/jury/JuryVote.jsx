@@ -204,6 +204,12 @@ export default function JuryVote() {
         }
         if (msg.type === "stage_ready") {
           setTimerStatus("ready");
+          // When stage is ready (time expired), close voting
+          setVoteClosed(true);
+          if (phase === "voting") {
+            setPhase("waiting");
+            setSubmitStatus("Time expired. Voting closed. Waiting for host to advance.");
+          }
           return;
         }
         if (msg.type === "stage_transition") {
@@ -273,7 +279,7 @@ export default function JuryVote() {
   }, [phase, enableWorstFake, worstSelectedPlayer]);
 
   function submitVote() {
-    if (phase !== "voting") return;
+    if (phase !== "voting" || voteClosed) return;
 
     if (!bestSelectedPlayer) {
       setSubmitStatus("Select a Best Fake before submitting.");
@@ -846,7 +852,7 @@ export default function JuryVote() {
               <button
                 type="button"
                 onClick={submitVote}
-                disabled={!bestSelectedPlayer}
+                disabled={!bestSelectedPlayer || voteClosed}
                 className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 transition-all"
               >
                 Submit Final Vote

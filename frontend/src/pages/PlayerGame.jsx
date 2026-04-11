@@ -11,8 +11,6 @@ import { pickRandomPlayerAvatarUrl } from "../utils/playerAvatars";
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
   const normalized = String(imagePath).trim();
-
-  // Keep already-resolved URLs untouched.
   if (
     normalized.startsWith("http://") ||
     normalized.startsWith("https://") ||
@@ -21,12 +19,24 @@ function getImageUrl(imagePath) {
   ) {
     return normalized;
   }
+  if (normalized.startsWith("/")) return buildUrl(normalized);
+  return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
+}
 
-  // Preserve absolute app paths like /assets/... (prod) and /src/assets/... (dev).
+function getAvatarUrl(imagePath) {
+  if (!imagePath) return "";
+  const normalized = String(imagePath).trim();
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://") ||
+    normalized.startsWith("data:") ||
+    normalized.startsWith("blob:")
+  ) {
+    return normalized;
+  }
   if (normalized.startsWith("/")) {
     return normalized;
   }
-
   return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
 }
 
@@ -75,14 +85,15 @@ export default function PlayerGame() {
   const [stageLocked, setStageLocked] = useState(false); // true when stage ended or paused
   const [hasSubmitted, setHasSubmitted] = useState(false); // true after first fake submit
   const [timerError, setTimerError] = useState(null); // server-sent rejection message
+  const [submitFeedback, setSubmitFeedback] = useState("");
 
   const syncedAvatarUrl =
     playerAvatarUrl || sessionStatus?.player_avatars?.[playerName] || "";
-  const resolvedAvatarUrl = getImageUrl(syncedAvatarUrl);
+  const resolvedAvatarUrl = getAvatarUrl(syncedAvatarUrl);
   const displayAvatarUrl =
     resolvedAvatarUrl && !avatarLoadError
       ? resolvedAvatarUrl
-      : getImageUrl(fallbackAvatarUrl);
+      : getAvatarUrl(fallbackAvatarUrl);
 
   useEffect(() => {
     setAvatarLoadError(false);
@@ -169,6 +180,7 @@ export default function PlayerGame() {
             setStageLocked(false);
             setHasSubmitted(false);
             setTimerError(null);
+            setSubmitFeedback("");
           } else if (msg.type === "timer_update") {
             setTimerRemaining(msg.remaining);
             setTimerPaused(msg.paused);
@@ -415,6 +427,7 @@ export default function PlayerGame() {
                 <button
                   onClick={() => {
                     if (!myFake || stageLocked) return;
+                    const wasUpdate = hasSubmitted;
                     if (
                       wsRef.current &&
                       wsRef.current.readyState === WebSocket.OPEN
@@ -428,6 +441,11 @@ export default function PlayerGame() {
                       );
                     }
                     setHasSubmitted(true); // stay in submit phase — allow re-editing
+                    setSubmitFeedback(
+                      wasUpdate
+                        ? "Answer updated! You can keep editing until time runs out."
+                        : "Answer submitted! You can update it until time runs out.",
+                    );
                   }}
                   disabled={!myFake || stageLocked}
                   className={`mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 text-lg font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] hover:scale-[1.02] disabled:hover:scale-100 disabled:opacity-50 transition-all ${stageLocked ? "cursor-not-allowed" : ""}`}
@@ -436,7 +454,8 @@ export default function PlayerGame() {
                 </button>
                 {hasSubmitted && !stageLocked && (
                   <div className="mt-3 text-sm text-emerald-400/80 text-center">
-                    Answer submitted. You can update it until time runs out.
+                    {submitFeedback ||
+                      "Answer submitted! You can update it until time runs out."}
                   </div>
                 )}
                 {hasSubmitted && stageLocked && (

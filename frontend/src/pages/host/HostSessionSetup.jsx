@@ -7,7 +7,8 @@ import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
 
 const DEFAULTS = {
   stage1Seconds: 60,
-  stage2Seconds: 45,
+  stage2Seconds: 30,
+  stage3Seconds: 60,
   enableWorstFake: false,
 };
 
@@ -23,6 +24,7 @@ export default function HostSessionSetup() {
 
   const [stage1Seconds, setStage1Seconds] = useState(DEFAULTS.stage1Seconds);
   const [stage2Seconds, setStage2Seconds] = useState(DEFAULTS.stage2Seconds);
+  const [stage3Seconds, setStage3Seconds] = useState(DEFAULTS.stage3Seconds);
   const [enableWorstFake, setEnableWorstFake] = useState(
     DEFAULTS.enableWorstFake,
   );
@@ -45,6 +47,7 @@ export default function HostSessionSetup() {
           enable_worst_fake: enableWorstFake,
           stage1_duration: stage1Seconds,
           stage2_duration: stage2Seconds,
+          stage3_duration: stage3Seconds,
           host_avatar_url: hostAvatarUrl,
         },
         headers,
@@ -155,7 +158,7 @@ export default function HostSessionSetup() {
             </div>
 
             {/* Stage Timers Grid */}
-            <div className="grid gap-6 sm:grid-cols-2">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {/* Stage 1 Timer */}
               <div className="block bg-indigo-950/40 border border-indigo-500/20 p-5 rounded-xl">
                 <div className="text-sm font-semibold text-white mb-1">
@@ -205,6 +208,36 @@ export default function HostSessionSetup() {
                           10,
                           300,
                           DEFAULTS.stage2Seconds,
+                        ),
+                      )
+                    }
+                    className="w-full rounded-xl border border-indigo-500/30 bg-indigo-950/60 pl-4 pr-20 py-3 text-white outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 transition-all shadow-inner"
+                  />
+                  <span className="absolute right-4 text-sm text-indigo-400/60 pointer-events-none select-none">
+                    seconds
+                  </span>
+                </div>
+              </div>
+
+              {/* Stage 3 Timer */}
+              <div className="block bg-indigo-950/40 border border-indigo-500/20 p-5 rounded-xl">
+                <div className="text-sm font-semibold text-white mb-1">
+                  Stage 3 timer
+                </div>
+                <div className="text-xs text-indigo-300/70 mb-4 h-8 leading-tight">
+                  Jury votes on best and/or worst fakes.
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type="number"
+                    value={stage3Seconds}
+                    onChange={(e) =>
+                      setStage3Seconds(
+                        clampInt(
+                          e.target.value,
+                          10,
+                          300,
+                          DEFAULTS.stage3Seconds,
                         ),
                       )
                     }

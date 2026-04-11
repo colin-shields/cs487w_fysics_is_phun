@@ -118,7 +118,7 @@ export default function DeckListPanel() {
     setBusy(false);
   }
 
-  async function loadDecks() {
+  async function loadDecks(preferredDeckId = null) {
     setBusy(true);
     setError("");
 
@@ -165,7 +165,27 @@ export default function DeckListPanel() {
       );
 
       setDecks(detailedDecks);
-      if (detailedDecks.length > 0) setSelectedDeck(detailedDecks[0]);
+      const preferredId =
+        preferredDeckId || selectedDeck?.deck_id || activeDeck?.deckId || null;
+      const nextSelectedDeck =
+        detailedDecks.find((deck) => deck?.deck_id === preferredId) ||
+        detailedDecks[0] ||
+        null;
+      setSelectedDeck(nextSelectedDeck);
+
+      if (activeDeck?.deckId) {
+        const refreshedActiveDeck = detailedDecks.find(
+          (deck) => deck?.deck_id === activeDeck.deckId,
+        );
+        if (refreshedActiveDeck) {
+          setActiveDeck({
+            name: refreshedActiveDeck.deck_id,
+            questions: getQuestionsArray(refreshedActiveDeck),
+            uploadedAt: Date.now(),
+            deckId: refreshedActiveDeck.deck_id,
+          });
+        }
+      }
       setBusy(false);
     } catch (err) {
       console.error("Deck loading error:", err);
@@ -229,9 +249,10 @@ export default function DeckListPanel() {
   }
 
   async function handleEditClose(saved) {
+    const editedDeckId = editingDeck?.name || null;
     setIsEditOpen(false);
     setEditingDeck(null);
-    if (saved) await loadDecks();
+    if (saved) await loadDecks(editedDeckId);
   }
 
   async function onDownloadBackup(deck) {

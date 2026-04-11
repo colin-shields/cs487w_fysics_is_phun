@@ -63,5 +63,29 @@ def zip_deck(deck_path, zip_path):
 
 
 def extract_deck(zip_path):
+    os.makedirs("decks", exist_ok=True)
+    os.makedirs("assets", exist_ok=True)
+
     with ZipFile(zip_path, 'r', compression=ZIP_DEFLATED) as zipf:
-        zipf.extractall()
+        for member in zipf.infolist():
+            name = member.filename.replace("\\", "/")
+            if not name or name.endswith("/"):
+                continue
+
+            base_name = os.path.basename(name)
+            if not base_name:
+                continue
+
+            if name.startswith("decks/"):
+                target_path = os.path.join("decks", base_name)
+            elif name.startswith("assets/"):
+                target_path = os.path.join("assets", base_name)
+            else:
+                ext = os.path.splitext(base_name)[1].lower()
+                if ext == ".csv":
+                    target_path = os.path.join("decks", base_name)
+                else:
+                    target_path = os.path.join("assets", base_name)
+
+            with zipf.open(member) as src, open(target_path, "wb") as dst:
+                dst.write(src.read())

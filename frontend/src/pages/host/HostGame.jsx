@@ -16,9 +16,17 @@ import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
 
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
-  if (imagePath.startsWith("/assets/")) return buildUrl(imagePath);
-  if (imagePath.startsWith("http")) return imagePath;
-  return buildUrl(`/assets/${imagePath}`);
+  const normalized = String(imagePath).trim();
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://") ||
+    normalized.startsWith("data:") ||
+    normalized.startsWith("blob:")
+  ) {
+    return normalized;
+  }
+  if (normalized.startsWith("/")) return buildUrl(normalized);
+  return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
 }
 
 function getAvatarUrl(imagePath) {
@@ -58,7 +66,14 @@ export default function HostGame() {
   const [answerPool, setAnswerPool] = useState([]);
   const [resultStats, setResultStats] = useState(null);
   const [juryVoteCount, setJuryVoteCount] = useState(0);
+  const [playerVoteCount, setPlayerVoteCount] = useState(0);
+  const [totalPlayers, setTotalPlayers] = useState(0);
   const [totalJurors, setTotalJurors] = useState(0);
+  const [players, setPlayers] = useState([]);
+  const [votedPlayers, setVotedPlayers] = useState([]);
+  const [waitingPlayers, setWaitingPlayers] = useState([]);
+  const [votedJurors, setVotedJurors] = useState([]);
+  const [waitingJurors, setWaitingJurors] = useState([]);
   const [roundBreakdown, setRoundBreakdown] = useState(null);
   const [currentScores, setCurrentScores] = useState({});
   const [autoProgress, setAutoProgress] = useState(false);
@@ -125,16 +140,25 @@ export default function HostGame() {
           const msg = JSON.parse(evt.data);
           console.log("Received message:", msg.type, msg);
           if (msg.type === "submission") {
-            setSubmissions((prev) => [...prev, msg.player]);
+            setSubmissions((prev) =>
+              prev.includes(msg.player) ? prev : [...prev, msg.player],
+            );
           } else if (msg.type === "answers") {
             setAnswerPool(msg.answers || []);
             setPhase("answers");
+          } else if (msg.type === "choice_vote_count") {
+            setPlayerVoteCount(msg.count);
+            setTotalPlayers(msg.total_players);
+            setVotedPlayers(Array.isArray(msg.voted_players) ? msg.voted_players : []);
+            setWaitingPlayers(Array.isArray(msg.waiting_players) ? msg.waiting_players : []);
           } else if (msg.type === "results") {
             setResultStats(msg.stats);
             setPhase("results");
           } else if (msg.type === "jury_vote_count") {
             setJuryVoteCount(msg.count);
             setTotalJurors(msg.total_jurors);
+            setVotedJurors(Array.isArray(msg.voted_jurors) ? msg.voted_jurors : []);
+            setWaitingJurors(Array.isArray(msg.waiting_jurors) ? msg.waiting_jurors : []);
           } else if (msg.type === "round_scores") {
             setRoundBreakdown(msg.breakdown || {});
             setCurrentScores(msg.scores || {});
@@ -151,6 +175,7 @@ export default function HostGame() {
             // Only clear the ready banner — phase changes are driven by subsequent messages
             // (e.g. "answers" msg sets phase="answers", "results" msg sets phase="results")
             setStageReadyReason(null);
+            setAllJurorsVoted(false); // Clear jury ready state when transitioning
             setTimerStatus("idle");
           } else if (msg.type === "skip_question") {
             setCurrentQuestionIndex((prev) =>
@@ -186,6 +211,34 @@ export default function HostGame() {
         if (!res.ok) return;
         const data = await res.json();
         setHostAvatarUrl(data?.player_avatars?.Host || "");
+        const players = Array.isArray(data?.players) ? data.players : [];
+        setPlayers(players);
+        setTotalPlayers(players.length);
+        const currentIdx =
+          typeof data?.current_index === "number"
+            ? data.current_index
+            : currentQuestionIndex;
+        const roundSubmissions = Array.isArray(data?.submissions?.[currentIdx])
+          ? data.submissions[currentIdx]
+          : [];
+        const submittedPlayers = [
+          ...new Set(
+            roundSubmissions
+              .filter((entry) => entry?.player && entry?.text !== "No submission")
+              .map((entry) => entry.player),
+          ),
+        ];
+        setSubmissions(submittedPlayers);
+        setWaitingPlayers((prev) => {
+          if (playerVoteCount > 0 || votedPlayers.length > 0) return prev;
+          return players;
+        });
+        const jurors = Array.isArray(data?.jurors) ? data.jurors : [];
+        setTotalJurors(jurors.length);
+        setWaitingJurors((prev) => {
+          if (juryVoteCount > 0 || votedJurors.length > 0) return prev;
+          return jurors;
+        });
       } catch {
         // Keep fallback avatar when status fetch fails.
       }
@@ -194,7 +247,7 @@ export default function HostGame() {
     refreshHostAvatar();
     const iv = setInterval(refreshHostAvatar, 2000);
     return () => clearInterval(iv);
-  }, [roomCode]);
+  }, [roomCode, currentQuestionIndex, playerVoteCount, votedPlayers.length, juryVoteCount, votedJurors.length]);
 
   if (!activeDeck || !roomCode) {
     return (
@@ -224,6 +277,11 @@ export default function HostGame() {
     setAnswerPool([]);
     setResultStats(null);
     setJuryVoteCount(0);
+    setPlayerVoteCount(0);
+    setVotedPlayers([]);
+    setWaitingPlayers([]);
+    setVotedJurors([]);
+    setWaitingJurors([]);
     setRoundBreakdown(null);
     setTimerRemaining(null);
     setTimerPaused(false);
@@ -253,12 +311,9 @@ export default function HostGame() {
         } else if (phase === "answers") {
           requestResults();
         } else if (phase === "results") {
-          // New: Automatically trigger Jury phase from Results
           startJuryPhase();
         } else if (phase === "jury") {
           requestJuryResults();
-        } else if (phase === "roundLeaderboard") {
-          if (!isLastQuestion) goToNext();
         }
       }, 3000);
     }
@@ -425,42 +480,27 @@ export default function HostGame() {
               </div>
             </div>
             <div className="flex items-center gap-4">
-              {/* Phase badge */}
               <div
-                className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                  phase === "collecting"
-                    ? "bg-indigo-900/50 border-indigo-500/40 text-indigo-300"
-                    : phase === "answers"
-                      ? "bg-purple-900/50 border-purple-500/40 text-purple-300"
-                      : phase === "results"
-                        ? "bg-emerald-900/50 border-emerald-500/40 text-emerald-300"
-                        : phase === "jury"
-                          ? "bg-amber-900/50 border-amber-500/40 text-amber-300"
-                          : "bg-teal-900/50 border-teal-500/40 text-teal-300"
+                className={`px-4 py-2 rounded-full text-sm font-bold border ${
+                  phase === "jury"
+                    ? "bg-amber-900/50 border-amber-500/40 text-amber-300"
+                    : phase === "roundLeaderboard"
+                      ? "bg-teal-900/50 border-teal-500/40 text-teal-300"
+                    : "bg-indigo-900/50 border-indigo-500/40 text-indigo-300"
                 }`}
               >
-                {phase === "collecting"
-                  ? "Collecting Fakes"
+                {phase === "roundLeaderboard"
+                  ? "All Done!"
+                  : phase === "jury"
+                  ? `${juryVoteCount}/${totalJurors} Jurors Voted`
                   : phase === "answers"
-                    ? "Players Choosing"
-                    : phase === "results"
-                      ? "Results"
-                      : phase === "jury"
-                        ? "Jury Voting"
-                        : "Round Scores"}
-              </div>
-              <div className="w-48 h-3 bg-[#0a0523]/60 border border-indigo-500/30 rounded-full overflow-hidden shadow-inner">
-                <div
-                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-700 ease-out"
-                  style={{
-                    width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%`,
-                  }}
-                />
+                    ? `${playerVoteCount}/${totalPlayers} Players Voted`
+                    : `${submissions.length}/${totalPlayers} Players Submitted`}
               </div>
             </div>
           </div>
 
-          {/* Timer bar — shown during Stage 1 and Stage 2 */}
+          {/* Timer bar — shown during Stage 1, Stage 2, and Stage 3 */}
           {timerRemaining !== null && timerStatus !== "idle" && (
             <div className="mt-4 flex items-center gap-3 relative z-10">
               <div
@@ -477,7 +517,7 @@ export default function HostGame() {
                 {timerStatus === "ready" ? "READY" : `${timerRemaining}s`}
               </div>
               {(timerStatus === "running" || timerStatus === "paused") &&
-                currentStage !== 3 && (
+                (
                   <div className="flex gap-2">
                     {timerStatus === "running" ? (
                       <button
@@ -556,9 +596,11 @@ export default function HostGame() {
               Stage {currentStage} Complete
             </div>
             <div className="text-sm text-amber-200/70">
-              {stageReadyReason === "timeout"
-                ? "Time expired."
-                : "All players submitted."}{" "}
+              {phase === "jury"
+                ? "All jurors have voted."
+                : stageReadyReason === "timeout"
+                  ? "Time expired."
+                  : "All players submitted."}{" "}
               Use the button below to advance.
             </div>
           </section>
@@ -688,25 +730,76 @@ export default function HostGame() {
 
         {/* Phase-specific info panels */}
         {phase === "collecting" && (
-          <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-5 shadow-inner flex items-center justify-between">
-            <div className="text-sm font-bold text-indigo-200">
-              Waiting for players to submit fakes
-            </div>
-            <div className="flex -space-x-2">
-              {Array.from({ length: Math.min(submissions.length, 5) }).map(
-                (_, i) => (
-                  <div
-                    key={i}
-                    className="w-8 h-8 rounded-full bg-indigo-600 border-2 border-[#0a0523] animate-pulse"
-                    style={{ animationDelay: `${i * 150}ms`, zIndex: 10 - i }}
-                  ></div>
-                ),
-              )}
-              {submissions.length > 5 && (
-                <div className="w-8 h-8 rounded-full bg-indigo-800 border-2 border-[#0a0523] flex items-center justify-center text-[10px] font-bold text-white">
-                  +{submissions.length - 5}
+          <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-6 shadow-inner space-y-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-1 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+                  Collecting Fake Answers
                 </div>
-              )}
+                <div className="text-sm font-medium text-indigo-200/80">
+                  See who has already submitted and who is still typing
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-black text-white">
+                  {submissions.length}
+                  <span className="text-indigo-400/60 text-base font-medium">
+                    /{totalPlayers}
+                  </span>
+                </div>
+                <div className="text-xs font-bold uppercase tracking-wider text-indigo-400/60">
+                  submissions in
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-4">
+                <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-3">
+                  Submitted
+                </div>
+                {submissions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {submissions.map((player) => (
+                      <span
+                        key={player}
+                        className="rounded-full border border-emerald-500/30 bg-emerald-900/30 px-3 py-1 text-sm font-semibold text-emerald-100"
+                      >
+                        {player}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-emerald-200/70">
+                    No players have submitted yet.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/40 p-4">
+                <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-3">
+                  Waiting On
+                </div>
+                {totalPlayers - submissions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {players
+                      .filter((player) => !submissions.includes(player))
+                      .map((player) => (
+                        <span
+                          key={player}
+                          className="rounded-full border border-indigo-500/30 bg-indigo-900/20 px-3 py-1 text-sm font-semibold text-indigo-100"
+                        >
+                          {player}
+                        </span>
+                      ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-indigo-200/70">
+                    Everyone submitted!
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}
@@ -726,6 +819,92 @@ export default function HostGame() {
                   {ans}
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+
+        {phase === "answers" &&
+          playerVoteCount >= totalPlayers &&
+          totalPlayers > 0 && (
+            <section className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-5 py-3 shrink-0">
+              <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-0.5">
+                All Players Voted
+              </div>
+              <div className="text-sm text-emerald-200/70">
+                All {totalPlayers} players have locked in their choices.
+              </div>
+            </section>
+          )}
+
+        {phase === "answers" && (
+          <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/20 p-6 shadow-inner space-y-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-1 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+                  Players Choosing
+                </div>
+                <div className="text-sm font-medium text-indigo-200/80">
+                  Track who has already voted and who is still deciding
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-black text-white">
+                  {playerVoteCount}
+                  <span className="text-indigo-400/60 text-base font-medium">
+                    /{totalPlayers}
+                  </span>
+                </div>
+                <div className="text-xs font-bold uppercase tracking-wider text-indigo-400/60">
+                  votes in
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-4">
+                <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-3">
+                  Voted
+                </div>
+                {votedPlayers.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {votedPlayers.map((player) => (
+                      <span
+                        key={player}
+                        className="rounded-full border border-emerald-500/30 bg-emerald-900/30 px-3 py-1 text-sm font-semibold text-emerald-100"
+                      >
+                        {player}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-emerald-200/70">
+                    No players have voted yet.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/40 p-4">
+                <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-3">
+                  Waiting On
+                </div>
+                {waitingPlayers.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {waitingPlayers.map((player) => (
+                      <span
+                        key={player}
+                        className="rounded-full border border-indigo-500/30 bg-indigo-900/20 px-3 py-1 text-sm font-semibold text-indigo-100"
+                      >
+                        {player}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-indigo-200/70">
+                    Everyone voted!
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}
@@ -776,8 +955,8 @@ export default function HostGame() {
           )}
 
         {phase === "jury" && (
-          <section className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-6 shadow-inner">
-            <div className="flex items-center justify-between">
+          <section className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-6 shadow-inner space-y-5">
+            <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-1 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
@@ -797,6 +976,52 @@ export default function HostGame() {
                 <div className="text-xs font-bold uppercase tracking-wider text-amber-400/60">
                   votes in
                 </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-4">
+                <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-3">
+                  Voted
+                </div>
+                {votedJurors.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {votedJurors.map((juror) => (
+                      <span
+                        key={juror}
+                        className="rounded-full border border-emerald-500/30 bg-emerald-900/30 px-3 py-1 text-sm font-semibold text-emerald-100"
+                      >
+                        {juror}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-emerald-200/70">
+                    No jurors have voted yet.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-amber-500/20 bg-[#0a0523]/40 p-4">
+                <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-3">
+                  Waiting On
+                </div>
+                {waitingJurors.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {waitingJurors.map((juror) => (
+                      <span
+                        key={juror}
+                        className="rounded-full border border-amber-500/30 bg-amber-900/20 px-3 py-1 text-sm font-semibold text-amber-100"
+                      >
+                        {juror}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-amber-200/70">
+                    Everyone voted!
+                  </div>
+                )}
               </div>
             </div>
           </section>

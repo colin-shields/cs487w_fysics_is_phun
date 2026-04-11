@@ -17,7 +17,6 @@ import shutil
 import os
 import uuid
 
-
 app = FastAPI()
 # CORS: allow the Vite dev server (React) to call this API from the browser.
 # Vite default dev URL is http://localhost:5173
@@ -125,7 +124,7 @@ class SessionRequest(BaseModel):
     deck_id: str
     enable_worst_fake: bool = False
     stage1_duration: int = 60
-    stage2_duration: int = 45
+    stage2_duration: int = 30
     stage3_duration: int = 60
     host_avatar_url: Optional[str] = None
 
@@ -277,6 +276,35 @@ async def _broadcast(code: str, msg: dict):
         except ValueError:
             pass
 
+def _build_jury_vote_progress(sess: dict, question_index) -> dict:
+    """Build a consistent jury progress payload for host/juror reconnect sync."""
+    jurors = list(sess.get("jurors", []))
+    votes_for_question = sess.get("jury_votes", {}).get(question_index, {})
+    voted_jurors = [name for name in jurors if name in votes_for_question]
+    waiting_jurors = [name for name in jurors if name not in votes_for_question]
+    return {
+        "type": "jury_vote_count",
+        "count": len(voted_jurors),
+        "total_jurors": len(jurors),
+        "voted_jurors": voted_jurors,
+        "waiting_jurors": waiting_jurors,
+    }
+
+def _build_choice_vote_progress(sess: dict, question_index) -> dict:
+    """Build a consistent player choice progress payload for host sync."""
+    players = list(sess.get("players", []))
+    choices_for_question = sess.get("choices", {}).get(question_index, [])
+    chosen_players = {entry.get("player") for entry in choices_for_question if entry.get("player")}
+    voted_players = [name for name in players if name in chosen_players]
+    waiting_players = [name for name in players if name not in chosen_players]
+    return {
+        "type": "choice_vote_count",
+        "count": len(voted_players),
+        "total_players": len(players),
+        "voted_players": voted_players,
+        "waiting_players": waiting_players,
+    }
+
 async def _cancel_timer(code: str):
     """Cancel the running timer task for a room, if any."""
     sess = active_sessions.get(code)
@@ -403,6 +431,9 @@ async def session_ws(websocket: WebSocket, room_code: str):
             # 3. if Stage 2 is active, resend the shuffled answers so the player can choose
             if sess.get("current_stage") == 2 and sess.get("current_answers_shuffled"):
                 await websocket.send_json({"type": "answers", "answers": sess["current_answers_shuffled"]})
+                await websocket.send_json(
+                    _build_choice_vote_progress(sess, sess.get("current_index"))
+                )
             # 4. if READY state, resend stage_ready so clients show the correct banner
             if sess.get("stage_status") == "ready":
                 await websocket.send_json({
@@ -413,6 +444,9 @@ async def session_ws(websocket: WebSocket, room_code: str):
             # 5. if jury phase is active, resend jury_phase so reconnecting jurors can vote
             if sess.get("jury_phase_active") and sess.get("jury_phase_payload"):
                 await websocket.send_json(sess["jury_phase_payload"])
+                await websocket.send_json(
+                    _build_jury_vote_progress(sess, sess.get("current_index"))
+                )
 
     try:
         while True:
@@ -514,6 +548,7 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     random.shuffle(answers_list)
                     sess["current_answers_shuffled"] = answers_list
                     await _broadcast(code, {"type": "answers", "answers": answers_list})
+                    await _broadcast(code, _build_choice_vote_progress(sess, idx))
                     await _broadcast(code, {"type": "stage_transition", "from_stage": 1, "to_stage": 2})
                     await _start_stage(code, 2)
                 elif from_stage == 2:
@@ -551,6 +586,7 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 # record the choice for stats
                 choices = sess.setdefault("choices", {})
                 choices.setdefault(idx, []).append({"player": player, "text": choice})
+                await _broadcast(code, _build_choice_vote_progress(sess, idx))
                 # check if all players have chosen — end stage early if so
                 chose_players = {e["player"] for e in choices.get(idx, [])}
                 all_players = set(sess.get("players", []))
@@ -588,13 +624,12 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 fakes = [{"player": e["player"], "text": e["text"]} for e in subs if e.get("player") and e.get("text") != "No submission"] # only include real submissions, not the "No submission" placeholders
                 fakes.append({"player": "Host", "text": active_sessions[code].get("current_question", {}).get("Predefined_Fake", "")})
                 enable_worst_fake = active_sessions[code].get("enable_worst_fake", False)
-                total_jurors = len(active_sessions[code].get("jurors", []))
                 payload = {"type": "jury_phase", "fakes": fakes, "enable_worst_fake": enable_worst_fake}
                 active_sessions[code]["jury_phase_active"] = True
                 active_sessions[code]["jury_phase_payload"] = payload  # cache for reconnect resync
                 await _broadcast(code, payload)
                 # Broadcast initial jury vote progress (0/N) so host displays total jurors immediately
-                await _broadcast(code, {"type": "jury_vote_count", "count": 0, "total_jurors": total_jurors})
+                await _broadcast(code, _build_jury_vote_progress(active_sessions[code], idx))
                 # Start the jury voting timer (stage 3)
                 await _start_stage(code, 3)
             elif msg.get("type") == "jury_vote":
@@ -609,13 +644,13 @@ async def session_ws(websocket: WebSocket, room_code: str):
                         jury_votes = sess.setdefault("jury_votes", {})
                         jury_votes.setdefault(idx, {})[juror_name] = {"best": best, "worst": worst}
                         # broadcast vote count to all (host uses it to track progress)
-                        total_jurors = len(sess.get("jurors", []))
-                        vote_count = len(jury_votes.get(idx, {}))
-                        for ws in session_sockets.get(code, [])[:]:
-                            try:
-                                await ws.send_json({"type": "jury_vote_count", "count": vote_count, "total_jurors": total_jurors})
-                            except Exception:
-                                pass
+                        await _broadcast(code, _build_jury_vote_progress(sess, idx))
+                        # check if all jurors have voted — end stage and stop timer (like stages 1 & 2)
+                        jurors = sess.get("jurors", [])
+                        voted_jurors = list(jury_votes.get(idx, {}).keys())
+                        if jurors and voted_jurors and set(voted_jurors) >= set(jurors):
+                            await _end_stage(code, 3, "all_submitted")
+                            await _cancel_timer(code)
             elif msg.get("type") == "jury_results":
                 # host requests jury scoring — compute fractional points and broadcast round_scores
                 idx = active_sessions[code].get("current_index")
@@ -711,8 +746,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 await _broadcast(code, payload)
             elif msg.get("type") == "pause":
                 sess = active_sessions[code]
-                # Only allow pause for stages 1 and 2, not for jury (stage 3)
-                if sess.get("stage_status") == "running" and sess.get("current_stage") in (1, 2):
+                # Allow pause for all three stages, but only if currently running
+                if sess.get("stage_status") == "running" and sess.get("current_stage") in (1, 2, 3):
                     sess["timer_paused"] = True
                     sess["stage_status"] = "paused"
                     await _broadcast(code, {
@@ -724,8 +759,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     })
             elif msg.get("type") == "resume":
                 sess = active_sessions[code]
-                # Only allow resume for stages 1 and 2, not for jury (stage 3)
-                if sess.get("stage_status") == "paused" and sess.get("current_stage") in (1, 2):
+                # Allow resume for all three stages, but only if currently paused
+                if sess.get("stage_status") == "paused" and sess.get("current_stage") in (1, 2, 3):
                     sess["timer_paused"] = False
                     sess["stage_status"] = "running"
                     await _broadcast(code, {
@@ -737,8 +772,8 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     })
             elif msg.get("type") == "extend_timer":
                 sess = active_sessions[code]
-                # Only allow extend for stages 1 and 2, not for jury (stage 3)
-                if sess.get("stage_status") in ("running", "paused") and sess.get("current_stage") in (1, 2):
+                # Allow extend for all three stages
+                if sess.get("stage_status") in ("running", "paused") and sess.get("current_stage") in (1, 2, 3):
                     sess["timer_remaining"] = sess.get("timer_remaining", 0) + 15
                     await _broadcast(code, {
                         "type": "timer_update",
@@ -933,5 +968,3 @@ async def api_extract_deck(file: UploadFile = File(...), _ok: bool = Depends(req
 
     os.remove(zip_path)
     return {"status": "success", "extracted_from": file.filename}
-
-

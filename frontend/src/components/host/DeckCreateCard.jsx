@@ -14,6 +14,21 @@ import { saveDeckApi, updateDeckApi, uploadAsset } from "../../api/decks";
 import { buildUrl } from "../../api/httpClient";
 import { useDeck } from "../../state/DeckContext.jsx";
 
+function getImageUrl(imagePath) {
+  if (!imagePath) return "";
+  const normalized = String(imagePath).trim();
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://") ||
+    normalized.startsWith("data:") ||
+    normalized.startsWith("blob:")
+  ) {
+    return normalized;
+  }
+  if (normalized.startsWith("/")) return buildUrl(normalized);
+  return buildUrl(`/assets/${normalized.replace(/^assets\//, "")}`);
+}
+
 function emptyRow() {
   return {
     Question_Text: "",
@@ -97,6 +112,22 @@ export default function DeckCreateCard({
       if (!file) {
         copy[index].Image_Link = "";
       }
+      return copy;
+    });
+  }
+
+  function clearRowImage(index) {
+    setRows((prev) => {
+      const copy = [...prev];
+      if (copy[index]?.Image_Preview) {
+        URL.revokeObjectURL(copy[index].Image_Preview);
+      }
+      copy[index] = {
+        ...copy[index],
+        Image_File: null,
+        Image_Link: "",
+        Image_Preview: "",
+      };
       return copy;
     });
   }
@@ -333,16 +364,20 @@ export default function DeckCreateCard({
                   Image (optional)
                 </label>
                 {(r.Image_Preview || r.Image_Link) && (
-                  <img
-                    src={
-                      r.Image_Preview ||
-                      (r.Image_Link.startsWith("http")
-                        ? r.Image_Link
-                        : buildUrl(r.Image_Link))
-                    }
-                    alt="question"
-                    className="mt-1 max-h-24 rounded"
-                  />
+                  <div className="mt-1 flex items-start gap-3">
+                    <img
+                      src={r.Image_Preview || getImageUrl(r.Image_Link)}
+                      alt="question"
+                      className="max-h-24 rounded"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => clearRowImage(idx)}
+                      className="rounded-lg border border-rose-800 bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-900/50"
+                    >
+                      Remove Image
+                    </button>
+                  </div>
                 )}
                 <input
                   type="file"
