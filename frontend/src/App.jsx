@@ -15,6 +15,7 @@ import HostGame from "./pages/host/HostGame.jsx";
 import HostLeaderboard from "./pages/host/HostLeaderboard.jsx";
 import PlayerJoin from "./pages/PlayerJoin.jsx";
 import PlayerGame from "./pages/PlayerGame.jsx";
+import SpectatorGame from "./pages/SpectatorGame.jsx";
 
 import RequireHostAuth from "./components/auth/RequireHostAuth.jsx";
 
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/player/game" element={<PlayerGame />} />
         <Route path="/jury" element={<JuryHome />} />
         <Route path="/jury/vote" element={<JuryVote />} />
+        <Route path="/spectator/:roomCode" element={<SpectatorGame />} />
 
         {/* Fallback */}
         <Route path="*" element={<ComingSoon title="404 — Page Not Found" />} />

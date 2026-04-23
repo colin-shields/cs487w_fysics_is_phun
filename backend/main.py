@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from host_auth import validate_host_code
 
+import csv
 import shutil
 import os
 import uuid
@@ -137,8 +138,18 @@ async def create_session(request: SessionRequest):
     
     host_avatar_url = (request.host_avatar_url or "").strip()
 
+    # Count the total number of questions in the deck
+    try:
+        parse_dict = validate_and_parse_csv(f"decks/{deck_id}")
+        questions = parse_dict.get("data", [])
+        total_questions = len(questions)
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse deck: {str(e)}")
+
     active_sessions[room_code] = {
         "deck_id": deck_id,
+        "total_questions": total_questions,
         "players": [],
         "player_avatars": {"Host": host_avatar_url} if host_avatar_url else {},
         "jurors": [],
@@ -231,6 +242,8 @@ async def get_session_status(room_code: str):
         "submissions": sess.get("submissions", {}),
         "choices": sess.get("choices", {}),
         "round_breakdown": sess.get("round_breakdown", {}),
+        "deck_id": sess.get("deck_id", ""),
+        "total_questions": sess.get("total_questions", 0),
     }  
     if sess.get("current_index") is not None:
         ret["current_index"] = sess["current_index"]

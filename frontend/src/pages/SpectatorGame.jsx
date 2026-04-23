@@ -1,18 +1,14 @@
 /**
- * HostGame.jsx
- * Host Game View - Display questions to the host
+ * SpectatorGame.jsx
+ * Spectator View - Display game state without host controls
  *
- * Phase order per round:
- *   collecting → answers → results → jury → roundLeaderboard
- * Then next question or end game.
+ * Similar to HostGame but read-only (no ability to pause, advance phases, etc.)
  */
 
 import React, { useEffect, useState, useMemo } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useDeck } from "../../state/DeckContext.jsx";
-import { buildUrl, buildWsUrl } from "../../api/httpClient";
-import { getHostCode } from "../../utils/hostAuth";
-import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
+import { useParams, useNavigate } from "react-router-dom";
+import { buildUrl, buildWsUrl } from "../api/httpClient";
+import { pickRandomPlayerAvatarUrl } from "../utils/playerAvatars";
 
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
@@ -52,11 +48,9 @@ function fmtPts(n) {
   return rounded >= 0 ? `+${rounded}` : `${rounded}`;
 }
 
-export default function HostGame() {
-  const location = useLocation();
+export default function SpectatorGame() {
+  const { roomCode } = useParams();
   const navigate = useNavigate();
-  const { roomCode } = location.state || {};
-  const { activeDeck } = useDeck();
 
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
@@ -69,52 +63,57 @@ export default function HostGame() {
   const [playerVoteCount, setPlayerVoteCount] = useState(0);
   const [totalPlayers, setTotalPlayers] = useState(0);
   const [totalJurors, setTotalJurors] = useState(0);
-  const [players, setPlayers] = useState([]);
   const [votedPlayers, setVotedPlayers] = useState([]);
   const [waitingPlayers, setWaitingPlayers] = useState([]);
   const [votedJurors, setVotedJurors] = useState([]);
   const [waitingJurors, setWaitingJurors] = useState([]);
   const [roundBreakdown, setRoundBreakdown] = useState(null);
   const [currentScores, setCurrentScores] = useState({});
-  const [autoProgress, setAutoProgress] = useState(false);
   // Timer / stage state
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [timerPaused, setTimerPaused] = useState(false);
   const [timerStatus, setTimerStatus] = useState("idle"); // "running" | "paused" | "ready" | "idle"
   const [currentStage, setCurrentStage] = useState(null);
-  const [stageReadyReason, setStageReadyReason] = useState(null);
-  const [wsSendError, setWsSendError] = useState(false);
   const [hostAvatarUrl, setHostAvatarUrl] = useState("");
   const [fallbackHostAvatarUrl] = useState(() => pickRandomPlayerAvatarUrl());
+  const [deckName, setDeckName] = useState("");
+  const [currentQuestion, setCurrentQuestion] = useState({});
+  const [totalQuestions, setTotalQuestions] = useState(0);
+  const [sessionCancelled, setSessionCancelled] = useState(false);
+  const [gameFinished, setGameFinished] = useState(false);
   const wsRef = React.useRef(null);
   const displayHostAvatarUrl =
     getAvatarUrl(hostAvatarUrl) || getAvatarUrl(fallbackHostAvatarUrl);
 
-  // Helper: send over WS, flag error if not connected
-  function wsSend(payload) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(payload));
-      setWsSendError(false);
-      return true;
-    }
-    setWsSendError(true);
-    setTimeout(() => setWsSendError(false), 4800);
-    return false;
-  }
-
   useEffect(() => {
-    if (!activeDeck) {
-      navigate("/host");
-      return;
-    }
     if (!roomCode) {
-      navigate("/host/lobby");
+      navigate("/");
       return;
     }
-  }, [activeDeck, roomCode, navigate]);
+  }, [roomCode, navigate]);
+
+  // Reset phase and state when question changes
+  useEffect(() => {
+    setPhase("collecting");
+    setSubmissions([]);
+    setAnswerPool([]);
+    setResultStats(null);
+    setJuryVoteCount(0);
+    setPlayerVoteCount(0);
+    setVotedPlayers([]);
+    setWaitingPlayers([]);
+    setVotedJurors([]);
+    setWaitingJurors([]);
+    setRoundBreakdown(null);
+    setCurrentScores({});
+    setTimerRemaining(null);
+    setTimerPaused(false);
+    setTimerStatus("idle");
+    setCurrentStage(null);
+  }, [currentQuestionIndex]);
 
   useEffect(() => {
-    if (!roomCode) return;
+    if (!roomCode || sessionCancelled) return;
 
     let ws;
     let reconnectTimeout;
@@ -138,7 +137,7 @@ export default function HostGame() {
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
-          console.log("Received message:", msg.type, msg);
+          console.log("Spectator received message:", msg.type, msg);
           if (msg.type === "submission") {
             setSubmissions((prev) =>
               prev.includes(msg.player) ? prev : [...prev, msg.player],
@@ -159,6 +158,8 @@ export default function HostGame() {
             setTotalJurors(msg.total_jurors);
             setVotedJurors(Array.isArray(msg.voted_jurors) ? msg.voted_jurors : []);
             setWaitingJurors(Array.isArray(msg.waiting_jurors) ? msg.waiting_jurors : []);
+          } else if (msg.type === "jury_phase") {
+            setPhase("jury");
           } else if (msg.type === "round_scores") {
             setRoundBreakdown(msg.breakdown || {});
             setCurrentScores(msg.scores || {});
@@ -170,20 +171,19 @@ export default function HostGame() {
             setCurrentStage(msg.stage);
           } else if (msg.type === "stage_ready") {
             setTimerStatus("ready");
-            setStageReadyReason(msg.reason);
           } else if (msg.type === "stage_transition") {
-            // Only clear the ready banner — phase changes are driven by subsequent messages
-            // (e.g. "answers" msg sets phase="answers", "results" msg sets phase="results")
-            setStageReadyReason(null);
-            setAllJurorsVoted(false); // Clear jury ready state when transitioning
             setTimerStatus("idle");
-          } else if (msg.type === "skip_question") {
-            setCurrentQuestionIndex((prev) =>
-              prev < totalQuestions - 1 ? prev + 1 : prev,
-            );
+          } else if (msg.type === "question") {
+            setCurrentQuestion(msg.question || {});
+            setCurrentQuestionIndex(msg.index || 0);
+          } else if (msg.type === "cancelled") {
+            cancelled = true;
+            setSessionCancelled(true);
+          } else if (msg.type === "game_finished") {
+            setGameFinished(true);
           }
         } catch (e) {
-          // ignore
+          console.warn("Error parsing spectator message:", e);
         }
       };
     }
@@ -196,60 +196,70 @@ export default function HostGame() {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [roomCode]);
+  }, [roomCode, sessionCancelled]);
 
+  // Fetch session status to get deck name, players, and initial state
   useEffect(() => {
     if (!roomCode) return;
 
-    async function refreshHostAvatar() {
+    async function refreshSessionStatus() {
       try {
-        const hostCode = getHostCode?.() || "";
-        const headers = hostCode ? { "X-Host-Code": hostCode } : {};
-        const res = await fetch(buildUrl(`/session-status/${roomCode}`), {
-          headers,
-        });
+        const res = await fetch(buildUrl(`/session-status/${roomCode}`));
         if (!res.ok) return;
         const data = await res.json();
+        
+        // Check if session was cancelled or game finished
+        if (data?.status === "cancelled") {
+          setSessionCancelled(true);
+          return;
+        }
+        if (data?.status === "finished") {
+          setGameFinished(true);
+          return;
+        }
+        
         setHostAvatarUrl(data?.player_avatars?.Host || "");
+        
+        // Extract deck name from deck_id (remove .csv extension if present)
+        const deckId = data?.deck_id || "";
+        const name = deckId.replace(/\.csv$/i, "");
+        setDeckName(name);
+        
+        // Set total questions from session data
+        setTotalQuestions(data?.total_questions || 0);
+
+        // Set total players and jurors from session data
         const players = Array.isArray(data?.players) ? data.players : [];
-        setPlayers(players);
         setTotalPlayers(players.length);
+        
+        const jurors = Array.isArray(data?.jurors) ? data.jurors : [];
+        setTotalJurors(jurors.length);
+        
         const currentIdx =
           typeof data?.current_index === "number"
             ? data.current_index
             : currentQuestionIndex;
-        const roundSubmissions = Array.isArray(data?.submissions?.[currentIdx])
-          ? data.submissions[currentIdx]
-          : [];
-        const submittedPlayers = [
-          ...new Set(
-            roundSubmissions
-              .filter((entry) => entry?.player && entry?.text !== "No submission")
-              .map((entry) => entry.player),
-          ),
-        ];
-        setSubmissions(submittedPlayers);
-        setWaitingPlayers((prev) => {
-          if (playerVoteCount > 0 || votedPlayers.length > 0) return prev;
-          return players;
-        });
-        const jurors = Array.isArray(data?.jurors) ? data.jurors : [];
-        setTotalJurors(jurors.length);
-        setWaitingJurors((prev) => {
-          if (juryVoteCount > 0 || votedJurors.length > 0) return prev;
-          return jurors;
-        });
-      } catch {
-        // Keep fallback avatar when status fetch fails.
+        if (currentIdx !== currentQuestionIndex) {
+          setCurrentQuestionIndex(currentIdx);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch session status:", e);
       }
     }
 
-    refreshHostAvatar();
-    const iv = setInterval(refreshHostAvatar, 2000);
+    refreshSessionStatus();
+    const iv = setInterval(refreshSessionStatus, 2000);
     return () => clearInterval(iv);
-  }, [roomCode, currentQuestionIndex, playerVoteCount, votedPlayers.length, juryVoteCount, votedJurors.length]);
+  }, [roomCode, currentQuestionIndex]);
 
-  if (!activeDeck || !roomCode) {
+  // Navigate to /join when session is cancelled or game finishes
+  useEffect(() => {
+    if (sessionCancelled || gameFinished) {
+      navigate("/join");
+    }
+  }, [sessionCancelled, gameFinished, navigate]);
+
+  if (!roomCode) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-slate-300">Loading...</div>
@@ -257,148 +267,7 @@ export default function HostGame() {
     );
   }
 
-  const questions = activeDeck.questions || [];
-  const totalQuestions = questions.length;
   const isLastQuestion = currentQuestionIndex === totalQuestions - 1;
-  const currentQuestion = questions[currentQuestionIndex] || {};
-
-  function sendCurrentQuestion() {
-    wsSend({
-      type: "question",
-      index: currentQuestionIndex,
-      question: currentQuestion,
-      correctAnswer: currentQuestion.Correct_Answer,
-    });
-  }
-
-  useEffect(() => {
-    setPhase("collecting");
-    setSubmissions([]);
-    setAnswerPool([]);
-    setResultStats(null);
-    setJuryVoteCount(0);
-    setPlayerVoteCount(0);
-    setVotedPlayers([]);
-    setWaitingPlayers([]);
-    setVotedJurors([]);
-    setWaitingJurors([]);
-    setRoundBreakdown(null);
-    setTimerRemaining(null);
-    setTimerPaused(false);
-    setTimerStatus("idle");
-    setCurrentStage(null);
-    setStageReadyReason(null);
-    if (wsConnected) sendCurrentQuestion();
-  }, [currentQuestionIndex, wsConnected]);
-
-  // Auto-progress logic: triggers when timerStatus is "ready" or all jurors voted
-  // Updated auto-progress logic
-  useEffect(() => {
-    if (!autoProgress) return;
-
-    let timeout;
-    // Condition: Timer is ready OR all jurors voted OR we are on results/leaderboard
-    const shouldProgress =
-      timerStatus === "ready" ||
-      phase === "results" ||
-      (phase === "jury" && juryVoteCount >= totalJurors && totalJurors > 0) ||
-      phase === "roundLeaderboard";
-
-    if (shouldProgress) {
-      timeout = setTimeout(() => {
-        if (phase === "collecting") {
-          sendHostNext(1);
-        } else if (phase === "answers") {
-          requestResults();
-        } else if (phase === "results") {
-          startJuryPhase();
-        } else if (phase === "jury") {
-          requestJuryResults();
-        }
-      }, 3000);
-    }
-
-    return () => clearTimeout(timeout);
-  }, [
-    autoProgress,
-    timerStatus,
-    phase,
-    juryVoteCount,
-    totalJurors,
-    isLastQuestion,
-  ]);
-
-  function goToPrev() {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    }
-  }
-
-  function goToNext() {
-    if (currentQuestionIndex < totalQuestions - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
-    }
-  }
-
-  function sendHostNext(stage) {
-    if (wsSend({ type: "host_next", stage })) {
-      setStageReadyReason(null);
-    }
-  }
-
-  function sendPause() {
-    wsSend({ type: "pause" });
-  }
-
-  function sendResume() {
-    wsSend({ type: "resume" });
-  }
-
-  function sendExtendTimer() {
-    wsSend({ type: "extend_timer" });
-  }
-
-  function sendSkipQuestion() {
-    wsSend({ type: "skip_question" });
-  }
-
-  function requestResults() {
-    // Release the Stage 2 READY gate first, then request stats
-    if (wsSend({ type: "host_next", stage: 2 })) {
-      wsSend({ type: "results_request" });
-    }
-  }
-
-  function startJuryPhase() {
-    if (wsSend({ type: "jury_phase", question_index: currentQuestionIndex })) {
-      setPhase("jury");
-    }
-  }
-
-  function requestJuryResults() {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "jury_results" }));
-    }
-  }
-
-  async function onEndGame() {
-    wsSend({ type: "game_finished" });
-    navigate("/host/leaderboard", { state: { roomCode } });
-  }
-
-  async function onExitGame() {
-    try {
-      const hostCode = getHostCode?.() || "";
-      const headers = hostCode ? { "X-Host-Code": hostCode } : {};
-      await fetch(buildUrl(`/session/${roomCode}`), {
-        method: "DELETE",
-        headers,
-      });
-    } catch (e) {
-      console.warn("Failed to cancel session", e);
-    }
-    navigate("/host");
-  }
 
   // Sorted leaderboard for roundLeaderboard phase
   const sortedLeaderboard = useMemo(() => {
@@ -414,7 +283,7 @@ export default function HostGame() {
         <div className="mx-auto grid max-w-5xl grid-cols-3 items-center px-6 py-4">
           <div>
             <div className="text-xs font-bold uppercase tracking-widest text-indigo-400/80 mb-0.5">
-              Host View
+              Spectator View
             </div>
             <div className="font-bold text-white text-lg tracking-wide bg-gradient-to-r from-indigo-200 to-purple-200 bg-clip-text text-transparent">
               Game in Progress
@@ -439,30 +308,19 @@ export default function HostGame() {
               </span>
             </div>
             <button
-              onClick={() => window.open(`/spectator/${roomCode}`, "_blank")}
-              className="text-sm font-bold text-emerald-400 hover:text-emerald-300 underline underline-offset-4 transition-colors"
-            >
-              Spectator View
-            </button>
-            <button
-              onClick={onExitGame}
+              onClick={() => navigate("/join")}
               className="text-sm font-bold text-pink-400 hover:text-pink-300 underline underline-offset-4 transition-colors"
             >
-              Exit Game
+              Exit
             </button>
           </div>
         </div>
       </header>
 
-      {/* Disconnect banner — shown when WebSocket drops, auto-hides on reconnect */}
+      {/* Disconnect banner */}
       {!wsConnected && (
         <div className="bg-pink-950/90 border-b border-pink-500/40 px-6 py-2 text-sm font-bold text-pink-200 text-center">
           Connection lost — reconnecting automatically...
-        </div>
-      )}
-      {wsSendError && (
-        <div className="bg-amber-950/90 border-b border-amber-500/40 px-6 py-2 text-sm font-bold text-amber-200 text-center">
-          Action failed — not connected. Waiting to reconnect...
         </div>
       )}
 
@@ -492,7 +350,7 @@ export default function HostGame() {
                     ? "bg-amber-900/50 border-amber-500/40 text-amber-300"
                     : phase === "roundLeaderboard"
                       ? "bg-teal-900/50 border-teal-500/40 text-teal-300"
-                    : "bg-indigo-900/50 border-indigo-500/40 text-indigo-300"
+                      : "bg-indigo-900/50 border-indigo-500/40 text-indigo-300"
                 }`}
               >
                 {phase === "roundLeaderboard"
@@ -506,7 +364,7 @@ export default function HostGame() {
             </div>
           </div>
 
-          {/* Timer bar — shown during Stage 1, Stage 2, and Stage 3 */}
+          {/* Timer bar */}
           {timerRemaining !== null && timerStatus !== "idle" && (
             <div className="mt-4 flex items-center gap-3 relative z-10">
               <div
@@ -522,32 +380,6 @@ export default function HostGame() {
               >
                 {timerStatus === "ready" ? "READY" : `${timerRemaining}s`}
               </div>
-              {(timerStatus === "running" || timerStatus === "paused") &&
-                (
-                  <div className="flex gap-2">
-                    {timerStatus === "running" ? (
-                      <button
-                        onClick={sendPause}
-                        className="text-xs px-3 py-1 rounded-lg border border-yellow-500/40 text-yellow-300 hover:bg-yellow-900/40 transition-all"
-                      >
-                        Pause
-                      </button>
-                    ) : (
-                      <button
-                        onClick={sendResume}
-                        className="text-xs px-3 py-1 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40 transition-all"
-                      >
-                        Resume
-                      </button>
-                    )}
-                    <button
-                      onClick={sendExtendTimer}
-                      className="text-xs px-3 py-1 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/40 transition-all"
-                    >
-                      +15s
-                    </button>
-                  </div>
-                )}
             </div>
           )}
         </section>
@@ -612,7 +444,7 @@ export default function HostGame() {
             )}
           </div>
 
-          {/* Correct Answer only (results + jury + roundLeaderboard phases) */}
+          {/* Correct Answer */}
           {(phase === "results" ||
             phase === "jury" ||
             phase === "roundLeaderboard") && (
@@ -626,145 +458,6 @@ export default function HostGame() {
                 </div>
               </div>
             </div>
-          )}
-        </section>
-
-        {/* READY banner — informational only; the main phase button below is what advances */}
-        {timerStatus === "ready" && (
-          <section className="rounded-xl border border-amber-500/40 bg-amber-950/30 px-5 py-3 shrink-0">
-            <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-0.5">
-              Stage {currentStage} Complete
-            </div>
-            <div className="text-sm text-amber-200/70">
-              {phase === "jury"
-                ? "All jurors have voted."
-                : stageReadyReason === "timeout"
-                  ? "Time expired."
-                  : "All players submitted."}{" "}
-              Use the button below to advance.
-            </div>
-          </section>
-        )}
-
-        {/* Navigation Controls (phase-aware) */}
-        <section className="flex flex-col sm:flex-row gap-4 shrink-0">
-          <button
-            onClick={goToPrev}
-            disabled={phase !== "collecting" || currentQuestionIndex === 0}
-            className="sm:w-1/4 rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-200 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 disabled:opacity-40 disabled:hover:bg-indigo-950/60 disabled:hover:text-indigo-200 disabled:hover:border-indigo-500/30 transition-all flex items-center justify-center gap-2 shadow-inner"
-          >
-            ← Prev
-          </button>
-
-          {phase === "collecting" && (
-            <>
-              <button
-                onClick={() => sendHostNext(1)}
-                disabled={timerStatus !== "ready"}
-                className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-none transition-all flex items-center justify-center gap-3"
-              >
-                Show Answers
-                <span className="bg-[#0a0523]/40 border border-indigo-400/30 px-2 py-0.5 rounded-full text-xs shadow-inner">
-                  {submissions.length} submitted
-                </span>
-              </button>
-              {timerStatus !== "ready" && (
-                <button
-                  onClick={() => sendHostNext(1)}
-                  className="sm:w-auto rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-300 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 transition-all flex items-center justify-center"
-                >
-                  Skip Phase
-                </button>
-              )}
-            </>
-          )}
-
-          {phase === "answers" && (
-            <>
-              <button
-                onClick={requestResults}
-                disabled={timerStatus !== "ready"}
-                className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-none transition-all outline outline-2 outline-offset-2 outline-emerald-500/50"
-              >
-                Show Results
-              </button>
-              {timerStatus !== "ready" && (
-                <button
-                  onClick={requestResults}
-                  className="sm:w-auto rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-300 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 transition-all flex items-center justify-center"
-                >
-                  Skip Phase
-                </button>
-              )}
-            </>
-          )}
-
-          {phase === "results" && (
-            <button
-              onClick={startJuryPhase}
-              className="flex-1 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
-            >
-              <span>⚖</span> Start Jury Voting
-            </button>
-          )}
-
-          {phase === "jury" && (
-            <>
-              <button
-                onClick={requestJuryResults}
-                className="flex-1 rounded-xl bg-gradient-to-r from-teal-600 to-cyan-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(20,184,166,0.3)] hover:shadow-[0_0_30px_rgba(20,184,166,0.5)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                Show Round Scores
-              </button>
-              {juryVoteCount < totalJurors && (
-                <button
-                  onClick={requestJuryResults}
-                  className="sm:w-auto rounded-xl bg-indigo-950/60 border border-indigo-500/30 px-4 py-4 text-sm font-bold text-indigo-300 hover:bg-indigo-800 hover:text-white hover:border-indigo-400 transition-all flex items-center justify-center"
-                >
-                  Skip Phase
-                </button>
-              )}
-            </>
-          )}
-
-          {phase === "roundLeaderboard" && (
-            <button
-              onClick={isLastQuestion ? onEndGame : goToNext}
-              className={`flex-1 rounded-xl px-6 py-4 text-base font-bold text-white shadow-lg transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 ${
-                isLastQuestion
-                  ? "bg-gradient-to-r from-emerald-600 to-teal-500 shadow-[0_0_25px_rgba(16,185,129,0.4)] ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-slate-900"
-                  : "bg-indigo-600 hover:bg-indigo-500 shadow-[0_0_20px_rgba(79,70,229,0.3)]"
-              }`}
-            >
-              {isLastQuestion ? "End Game" : "Next Question →"}
-            </button>
-          )}
-
-          <button
-            onClick={() => setAutoProgress(!autoProgress)}
-            className={`sm:w-auto px-4 py-4 rounded-xl border font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-              autoProgress
-                ? "bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
-                : "bg-indigo-950/40 border-indigo-500/30 text-indigo-300 hover:border-indigo-400"
-            }`}
-          >
-            <div
-              className={`w-3 h-3 rounded-full ${autoProgress ? "bg-emerald-400 animate-pulse" : "bg-slate-600"}`}
-            ></div>
-            {autoProgress ? "Auto-Progress ON" : "Auto-Progress OFF"}
-          </button>
-
-          {phase !== "roundLeaderboard" && (
-            <button
-              onClick={isLastQuestion ? onEndGame : sendSkipQuestion}
-              className={`sm:w-auto rounded-xl px-4 py-4 text-sm font-bold transition-all flex items-center justify-center ${
-                isLastQuestion
-                  ? "bg-emerald-900/40 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600 hover:text-white hover:border-transparent"
-                  : "bg-indigo-950/60 border border-indigo-500/30 text-indigo-200 hover:bg-indigo-800 hover:text-white hover:border-indigo-400"
-              }`}
-            >
-              {isLastQuestion ? "End Game" : "Next Question →"}
-            </button>
           )}
         </section>
 
@@ -821,41 +514,13 @@ export default function HostGame() {
                 <div className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-3">
                   Waiting On
                 </div>
-                {totalPlayers - submissions.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {players
-                      .filter((player) => !submissions.includes(player))
-                      .map((player) => (
-                        <span
-                          key={player}
-                          className="rounded-full border border-indigo-500/30 bg-indigo-900/20 px-3 py-1 text-sm font-semibold text-indigo-100"
-                        >
-                          {player}
-                        </span>
-                      ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-indigo-200/70">
-                    Everyone submitted!
-                  </div>
-                )}
+                <div className="text-sm text-indigo-200/70">
+                  {totalPlayers - submissions.length} player(s) still submitting...
+                </div>
               </div>
             </div>
           </section>
         )}
-
-        {phase === "answers" &&
-          playerVoteCount >= totalPlayers &&
-          totalPlayers > 0 && (
-            <section className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-5 py-3 shrink-0">
-              <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-0.5">
-                All Players Voted
-              </div>
-              <div className="text-sm text-emerald-200/70">
-                All {totalPlayers} players have locked in their choices.
-              </div>
-            </section>
-          )}
 
         {phase === "answers" && (
           <section className="rounded-xl border border-indigo-500/20 bg-indigo-950/20 p-6 shadow-inner space-y-5">
@@ -960,20 +625,6 @@ export default function HostGame() {
             </div>
           </section>
         )}
-
-        {phase === "jury" &&
-          juryVoteCount >= totalJurors &&
-          totalJurors > 0 && (
-            <section className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-5 py-3 shrink-0">
-              <div className="text-xs font-bold uppercase tracking-widest text-emerald-300 mb-0.5">
-                All Jurors Voted
-              </div>
-              <div className="text-sm text-emerald-200/70">
-                All {totalJurors} jurors have submitted their votes — ready to
-                show round scores.
-              </div>
-            </section>
-          )}
 
         {phase === "jury" && (
           <section className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-6 shadow-inner space-y-5">
@@ -1124,7 +775,7 @@ export default function HostGame() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="text-sm font-medium text-indigo-200">
               Deck:{" "}
-              <span className="text-white font-bold">{activeDeck.name}</span>
+              <span className="text-white font-bold">{deckName || "Loading..."}</span>
             </div>
           </div>
         </section>
