@@ -58,6 +58,7 @@ export default function PlayerGame() {
   const [error, setError] = useState("");
   const [sessionCancelled, setSessionCancelled] = useState(false);
   const [gameFinished, setGameFinished] = useState(false);
+  const [isKicked, setIsKicked] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(null);
   const wsRef = useRef(null);
@@ -146,7 +147,11 @@ export default function PlayerGame() {
       ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      ws.onopen = () => setWsConnected(true);
+      ws.onopen = () => {
+        setWsConnected(true);
+        // Identify ourselves to the server
+        ws.send(JSON.stringify({ type: "identify", name: playerName }));
+      };
 
       ws.onclose = () => {
         setWsConnected(false);
@@ -199,6 +204,11 @@ export default function PlayerGame() {
           } else if (msg.type === "timer_error") {
             setTimerError(msg.message);
             setTimeout(() => setTimerError(null), 3000);
+          } else if (msg.type === "kicked") {
+            setIsKicked(true);
+            sessionStorage.removeItem("playerSession");
+            navigate("/join", { replace: true });
+            cancelled = true;
           } else if (msg.type === "cancelled") {
             setSessionCancelled(true);
           } else if (msg.type === "game_finished") {
@@ -234,6 +244,15 @@ export default function PlayerGame() {
       wsRef.current = null;
     };
   }, [roomCode, sessionCancelled]);
+
+  function leaveSession() {
+    sessionStorage.removeItem("playerSession");
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "leave", name: playerName }));
+    }
+    wsRef.current?.close();
+    navigate("/join", { replace: true });
+  }
 
   if (!roomCode || !playerName) {
     return (
@@ -346,6 +365,15 @@ export default function PlayerGame() {
                   {playerName}
                 </div>
               </div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={leaveSession}
+                className="text-sm font-semibold text-indigo-300 hover:text-white transition-colors underline underline-offset-4"
+              >
+                Leave
+              </button>
             </div>
           </div>
         </header>
@@ -682,6 +710,15 @@ export default function PlayerGame() {
                 {playerName}
               </div>
             </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={leaveSession}
+              className="text-sm font-semibold text-indigo-300 hover:text-white transition-colors underline underline-offset-4"
+            >
+              Leave
+            </button>
           </div>
         </div>
       </header>

@@ -29,8 +29,18 @@ export default function JuryVote() {
 
   const wsRef = useRef(null);
 
+  function leaveSession() {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "leave", name: jurorName }));
+    }
+    wsRef.current?.close();
+    sessionStorage.removeItem("jurorSession");
+    navigate("/jury", { replace: true });
+  }
+
   // phases: waiting | voting | submitted | results | finished | cancelled
   const [phase, setPhase] = useState("waiting");
+  const [isKicked, setIsKicked] = useState(false);
 
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -101,7 +111,11 @@ export default function JuryVote() {
       ws = new WebSocket(buildWsUrl(`/ws/session/${roomCode}`));
       wsRef.current = ws;
 
-      ws.onopen = () => setWsConnected(true);
+      ws.onopen = () => {
+        setWsConnected(true);
+        // Identify ourselves to the server
+        ws.send(JSON.stringify({ type: "identify", name: jurorName }));
+      };
 
       ws.onclose = () => {
         setWsConnected(false);
@@ -186,6 +200,13 @@ export default function JuryVote() {
         }
 
         // 5) Session cancelled / finished
+        if (msg.type === "kicked") {
+          setIsKicked(true);
+          sessionStorage.removeItem("jurorSession");
+          navigate("/jury", { replace: true });
+          cancelled = true;
+          return;
+        }
         if (msg.type === "cancelled") {
           setPhase("cancelled");
           return;
@@ -399,7 +420,7 @@ export default function JuryVote() {
 
             <button
               type="button"
-              onClick={() => navigate("/jury")}
+              onClick={leaveSession}
               className="text-sm font-semibold text-indigo-300 hover:text-white transition-colors underline underline-offset-4"
             >
               Leave
@@ -425,7 +446,7 @@ export default function JuryVote() {
             </div>
             <button
               type="button"
-              onClick={() => navigate("/jury")}
+              onClick={leaveSession}
               className="w-full max-w-sm mx-auto rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-base font-bold text-white hover:scale-[1.02] transition-all"
             >
               Return
@@ -443,7 +464,7 @@ export default function JuryVote() {
             </div>
             <button
               type="button"
-              onClick={() => navigate("/jury")}
+              onClick={leaveSession}
               className="w-full max-w-sm mx-auto rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-base font-bold text-white hover:scale-[1.02] transition-all"
             >
               Return

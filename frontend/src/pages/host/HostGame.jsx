@@ -13,6 +13,7 @@ import { useDeck } from "../../state/DeckContext.jsx";
 import { buildUrl, buildWsUrl } from "../../api/httpClient";
 import { getHostCode } from "../../utils/hostAuth";
 import { pickRandomPlayerAvatarUrl } from "../../utils/playerAvatars";
+import Modal from "../../components/host/Modal.jsx";
 
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
@@ -70,6 +71,7 @@ export default function HostGame() {
   const [totalPlayers, setTotalPlayers] = useState(0);
   const [totalJurors, setTotalJurors] = useState(0);
   const [players, setPlayers] = useState([]);
+  const [jurors, setJurors] = useState([]);
   const [votedPlayers, setVotedPlayers] = useState([]);
   const [waitingPlayers, setWaitingPlayers] = useState([]);
   const [votedJurors, setVotedJurors] = useState([]);
@@ -86,6 +88,8 @@ export default function HostGame() {
   const [wsSendError, setWsSendError] = useState(false);
   const [hostAvatarUrl, setHostAvatarUrl] = useState("");
   const [fallbackHostAvatarUrl] = useState(() => pickRandomPlayerAvatarUrl());
+  const [showKickModal, setShowKickModal] = useState(false);
+  const [playerToKick, setPlayerToKick] = useState(null);
   const wsRef = React.useRef(null);
   const displayHostAvatarUrl =
     getAvatarUrl(hostAvatarUrl) || getAvatarUrl(fallbackHostAvatarUrl);
@@ -124,7 +128,11 @@ export default function HostGame() {
       ws = new WebSocket(buildWsUrl(`/ws/session/${roomCode}`));
       wsRef.current = ws;
 
-      ws.onopen = () => setWsConnected(true);
+      ws.onopen = () => {
+        setWsConnected(true);
+        // Identify ourselves to the server
+        ws.send(JSON.stringify({ type: "identify", role: "host" }));
+      };
 
       ws.onclose = () => {
         setWsConnected(false);
@@ -181,6 +189,14 @@ export default function HostGame() {
             setCurrentQuestionIndex((prev) =>
               prev < totalQuestions - 1 ? prev + 1 : prev,
             );
+          } else if (msg.type === "player_kicked" || msg.type === "player_left") {
+            if (msg.role === "juror") {
+              setJurors((prev) => prev.filter((j) => j !== msg.player));
+              setTotalJurors((prev) => Math.max(0, prev - 1));
+            } else {
+              setPlayers((prev) => prev.filter((p) => p !== msg.player));
+              setTotalPlayers((prev) => Math.max(0, prev - 1));
+            }
           }
         } catch (e) {
           // ignore
@@ -234,6 +250,7 @@ export default function HostGame() {
           return players;
         });
         const jurors = Array.isArray(data?.jurors) ? data.jurors : [];
+        setJurors(jurors);
         setTotalJurors(jurors.length);
         setWaitingJurors((prev) => {
           if (juryVoteCount > 0 || votedJurors.length > 0) return prev;
@@ -398,6 +415,24 @@ export default function HostGame() {
       console.warn("Failed to cancel session", e);
     }
     navigate("/host");
+  }
+
+  function onKickPlayer(player) {
+    setPlayerToKick(player);
+    setShowKickModal(true);
+  }
+
+  function confirmKickPlayer() {
+    if (playerToKick) {
+      wsSend({ type: "kick_player", player: playerToKick });
+      setShowKickModal(false);
+      setPlayerToKick(null);
+    }
+  }
+
+  function cancelKickPlayer() {
+    setShowKickModal(false);
+    setPlayerToKick(null);
   }
 
   // Sorted leaderboard for roundLeaderboard phase
@@ -1119,6 +1154,72 @@ export default function HostGame() {
           </section>
         )}
 
+        {/* Kick Participants Section */}
+        <section className="rounded-xl border border-red-500/20 bg-red-950/20 backdrop-blur-md p-6 shadow-inner">
+          <div className="text-xs font-bold uppercase tracking-widest text-red-300 mb-4 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+            Manage Participants
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <div className="text-sm font-bold text-red-200 uppercase tracking-wider mb-3">
+                Players
+              </div>
+              <div className="space-y-3">
+                {players.length > 0 ? (
+                  players.map((player) => (
+                    <div
+                      key={player}
+                      className="flex items-center justify-between bg-[#0a0523]/60 border border-red-500/30 rounded-lg px-4 py-3"
+                    >
+                      <span className="text-red-100 font-medium">{player}</span>
+                      <button
+                        onClick={() => onKickPlayer(player)}
+                        className="text-red-400 hover:text-red-300 hover:bg-red-900/40 px-2 py-1 rounded transition-colors"
+                        title={`Kick ${player}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-red-500/20 bg-red-900/10 px-4 py-3 text-sm text-red-200">
+                    No players are currently connected.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-red-200 uppercase tracking-wider mb-3">
+                Jurors
+              </div>
+              <div className="space-y-3">
+                {jurors.length > 0 ? (
+                  jurors.map((juror) => (
+                    <div
+                      key={juror}
+                      className="flex items-center justify-between bg-[#0a0523]/60 border border-red-500/30 rounded-lg px-4 py-3"
+                    >
+                      <span className="text-red-100 font-medium">{juror}</span>
+                      <button
+                        onClick={() => onKickPlayer(juror)}
+                        className="text-red-400 hover:text-red-300 hover:bg-red-900/40 px-2 py-1 rounded transition-colors"
+                        title={`Kick ${juror}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-red-500/20 bg-red-900/10 px-4 py-3 text-sm text-red-200">
+                    No jurors are currently active.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Info footer */}
         <section className="rounded-xl border border-indigo-500/20 bg-[#0a0523]/40 p-5 mt-auto opacity-70 hover:opacity-100 transition-opacity">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1129,6 +1230,33 @@ export default function HostGame() {
           </div>
         </section>
       </main>
+
+      {/* Kick Confirmation Modal */}
+      <Modal
+        isOpen={showKickModal}
+        onClose={cancelKickPlayer}
+        title="Confirm Kick Player"
+      >
+        <div className="text-center">
+          <p className="text-indigo-200 mb-6">
+            Are you sure you want to kick <span className="font-bold text-white">{playerToKick}</span> from the game?
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={confirmKickPlayer}
+              className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-colors"
+            >
+              Yes, Kick Player
+            </button>
+            <button
+              onClick={cancelKickPlayer}
+              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

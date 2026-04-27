@@ -278,16 +278,15 @@ async def _broadcast(code: str, msg: dict):
     """Send a JSON message to all WebSocket connections in a room.
     Removes any connections that fail to receive the message."""
     dead = []
-    for ws in session_sockets.get(code, [])[:]:
+    for ws in list(session_sockets.get(code, {}).values()):
         try:
             await ws.send_json(msg)
         except Exception:
             dead.append(ws)
     for ws in dead:
-        try:
-            session_sockets[code].remove(ws)
-        except ValueError:
-            pass
+        for key, candidate in list(session_sockets.get(code, {}).items()):
+            if candidate is ws:
+                session_sockets[code].pop(key, None)
 
 def _build_jury_vote_progress(sess: dict, question_index) -> dict:
     """Build a consistent jury progress payload for host/juror reconnect sync."""
@@ -417,8 +416,9 @@ async def session_ws(websocket: WebSocket, room_code: str):
         await websocket.close(code=1008)
         return
 
-    # register
-    session_sockets.setdefault(code, []).append(websocket)
+    # register with a temporary anonymous connection key until the client identifies
+    anon_id = f"anonymous_{id(websocket)}"
+    session_sockets.setdefault(code, {})[anon_id] = websocket
     print(f"Registered socket for {code}; total connections={len(session_sockets[code])}")
 
     # resync a reconnecting client to current game state
@@ -466,7 +466,17 @@ async def session_ws(websocket: WebSocket, room_code: str):
             msg = await websocket.receive_json()
             print(f"Received ws msg for room={code}: {msg}")
             # expected format: {type:'question', index:..., question: {...}}
-            if msg.get("type") == "question":
+            if msg.get("type") == "identify":
+                name = msg.get("name")
+                role = msg.get("role", "player")
+                if name and role in ("player", "juror"):
+                    room_sockets = session_sockets.setdefault(code, {})
+                    # Remove the anonymous placeholder and replace with the identified name.
+                    anon_keys = [k for k, v in room_sockets.items() if v == websocket and k.startswith("anonymous_")]
+                    for key in anon_keys:
+                        del room_sockets[key]
+                    room_sockets[name] = websocket
+            elif msg.get("type") == "question":
                 # update session data
                 active_sessions[code]["status"] = "in-progress"
                 active_sessions[code]["current_index"] = msg.get("index")
@@ -478,7 +488,7 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 active_sessions[code]["current_answers_shuffled"] = []
                 # broadcast to all peers except sender
                 dead = []
-                for ws in session_sockets.get(code, [])[:]:
+                for ws in list(session_sockets.get(code, {}).values()):
                     if ws is websocket:
                         continue
                     try:
@@ -486,18 +496,17 @@ async def session_ws(websocket: WebSocket, room_code: str):
                     except Exception:
                         dead.append(ws)
                 for ws in dead:
-                    try:
-                        session_sockets[code].remove(ws)
-                    except ValueError:
-                        pass
+                    for key, candidate in list(session_sockets.get(code, {}).items()):
+                        if candidate is ws:
+                            session_sockets[code].pop(key, None)
                 # start Stage 1 timer
                 await _start_stage(code, 1)
             elif msg.get("type") == "cancelled": # host is cancelling the game
-                for ws in session_sockets.get(code, [])[:]: # broadcast to all peers except sender
-                    if ws is websocket: 
+                for ws in list(session_sockets.get(code, {}).values()): # broadcast to all peers except sender
+                    if ws is websocket:
                         continue
                     try:
-                        await ws.send_json({"type":"cancelled"}) # notify clients to exit
+                        await ws.send_json({"type":"cancelled"})
                     except Exception:
                         pass
             elif msg.get("type") == "fake":
@@ -521,7 +530,7 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 else:
                     subs.append({"player": player, "text": text})
                 # broadcast to host (and others) that a submission arrived
-                for ws in session_sockets.get(code, [])[:]:
+                for ws in list(session_sockets.get(code, {}).values()):
                     if ws is websocket:
                         continue
                     try:
@@ -618,14 +627,14 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 for choice in choices:     
                     stats[choice["text"]] = stats.get(choice["text"], 0) + 1
                 # broadcast results
-                for ws in session_sockets.get(code, [])[:]:
+                for ws in list(session_sockets.get(code, {}).values()):
                     if ws is websocket:
                         try:
                             await ws.send_json({"type": "results", "stats": stats})
                         except Exception:
                             pass
                     else:
-                        #the players should get whether they were correct or not, so include the correct answer in the payload for them but not for the host since they already know it
+                        # the players should get whether they were correct or not, so include the correct answer in the payload for them but not for the host since they already know it
                         try:
                             await ws.send_json({"type": "results", "correct": correct})
                         except Exception:
@@ -811,19 +820,70 @@ async def session_ws(websocket: WebSocket, room_code: str):
                 # host is ending the game; broadcast to all players
                 await _cancel_timer(code)
                 active_sessions[code]["status"] = "finished"
-                for ws in session_sockets.get(code, [])[:]:
+                for ws in list(session_sockets.get(code, {}).values()):
                     try:
                         await ws.send_json({"type": "game_finished"})
                     except Exception:
                         pass
+            elif msg.get("type") == "leave":
+                leaving_name = msg.get("name")
+                sess = active_sessions[code]
+                left_role = None
+                if leaving_name in sess.get("players", []):
+                    sess["players"].remove(leaving_name)
+                    left_role = "player"
+                    if leaving_name in sess.get("scores", {}):
+                        del sess["scores"][leaving_name]
+                elif leaving_name in sess.get("jurors", []):
+                    sess["jurors"].remove(leaving_name)
+                    left_role = "juror"
+                room_sockets = session_sockets.get(code, {})
+                if leaving_name in room_sockets:
+                    try:
+                        await room_sockets[leaving_name].close()
+                    except Exception:
+                        pass
+                    room_sockets.pop(leaving_name, None)
+                if leaving_name:
+                    await _broadcast(code, {"type": "player_left", "player": leaving_name, "role": left_role or "player"})
+            elif msg.get("type") == "kick_player":
+                # host is kicking a player or juror
+                player_to_kick = msg.get("player")
+                sess = active_sessions[code]
+                kicked_role = None
+                if player_to_kick in sess.get("players", []):
+                    sess["players"].remove(player_to_kick)
+                    kicked_role = "player"
+                    # Also remove from scores if present
+                    if player_to_kick in sess.get("scores", {}):
+                        del sess["scores"][player_to_kick]
+                elif player_to_kick in sess.get("jurors", []):
+                    sess["jurors"].remove(player_to_kick)
+                    kicked_role = "juror"
+                # Notify the kicked client if connected
+                room_sockets = session_sockets.get(code, {})
+                if player_to_kick in room_sockets:
+                    try:
+                        await room_sockets[player_to_kick].send_json({"type": "kicked", "role": kicked_role or "player"})
+                    except Exception:
+                        pass
+                    try:
+                        room_sockets[player_to_kick].close()
+                    except Exception:
+                        pass
+                    room_sockets.pop(player_to_kick, None)
+                # Broadcast updated player/juror list to all
+                await _broadcast(code, {"type": "player_kicked", "player": player_to_kick, "role": kicked_role or "player"})
             # ignore other message types for now
     except WebSocketDisconnect:
         print(f"WebSocketDisconnect for room={code}")
-        session_sockets[code].remove(websocket)
-        # cleanup empty list
+        for key, ws in list(session_sockets.get(code, {}).items()):
+            if ws is websocket:
+                session_sockets[code].pop(key, None)
+        # cleanup empty room mapping
         if not session_sockets[code]:
             del session_sockets[code]
-        print(f"Socket removed for {code}; remaining={len(session_sockets.get(code, []))}")
+        print(f"Socket removed for {code}; remaining={len(session_sockets.get(code, {}))}")
 
 @app.get("/decks")
 async def list_decks(_ok: bool = Depends(require_host)):

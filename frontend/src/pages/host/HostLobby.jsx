@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { buildUrl, httpDelete } from "../../api/httpClient";
+import { buildUrl, buildWsUrl, httpDelete } from "../../api/httpClient";
 import { getHostCode } from "../../utils/hostAuth";
 import playerQr from "../../assets/player_qr.png";
 import juryQr from "../../assets/jury_qr.png";
+import Modal from "../../components/host/Modal.jsx";
 
 export default function HostLobby() {
   const location = useLocation();
@@ -15,6 +16,10 @@ export default function HostLobby() {
   const [jurors, setJurors] = useState([]);
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [showKickModal, setShowKickModal] = useState(false);
+  const [playerToKick, setPlayerToKick] = useState(null);
+  const wsRef = React.useRef(null);
 
   useEffect(() => {
     if (!roomCode) return;
@@ -42,6 +47,51 @@ export default function HostLobby() {
     return () => clearInterval(iv);
   }, [roomCode]);
 
+  useEffect(() => {
+    if (!roomCode) return;
+
+    let ws;
+    let reconnectTimeout;
+
+    function connect() {
+      ws = new WebSocket(buildWsUrl(`/ws/session/${roomCode}`));
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        // Identify ourselves to the server
+        ws.send(JSON.stringify({ type: "identify", role: "host" }));
+      };
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        reconnectTimeout = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => ws.close();
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type === "player_kicked" || msg.type === "player_left") {
+            setPlayers((prev) => prev.filter(p => p !== msg.player));
+            setJurors((prev) => prev.filter(j => j !== msg.player));
+          }
+        } catch (e) {
+          // ignore
+        }
+      };
+    }
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, [roomCode]);
+
   async function onBackClick() {
     setCancelling(true);
     const hostCode = getHostCode?.() || "";
@@ -54,6 +104,32 @@ export default function HostLobby() {
     }
 
     navigate("/host/session");
+  }
+
+  function wsSend(payload) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(payload));
+      return true;
+    }
+    return false;
+  }
+
+  function onKickPlayer(player) {
+    setPlayerToKick(player);
+    setShowKickModal(true);
+  }
+
+  function confirmKickPlayer() {
+    if (playerToKick) {
+      wsSend({ type: "kick_player", player: playerToKick });
+      setShowKickModal(false);
+      setPlayerToKick(null);
+    }
+  }
+
+  function cancelKickPlayer() {
+    setShowKickModal(false);
+    setPlayerToKick(null);
   }
 
   if (!roomCode) {
@@ -200,18 +276,27 @@ export default function HostLobby() {
                 {players.map((n, i) => (
                   <li
                     key={i}
-                    className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-4 py-3 text-indigo-100 font-medium flex items-center gap-3 shadow-inner"
+                    className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-4 py-3 text-indigo-100 font-medium flex items-center justify-between shadow-inner"
                   >
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
-                      <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center text-white text-xs font-bold">
-                        <img
-                          src={playerAvatars[n] || ""}
-                          alt={`${n} avatar`}
-                          className="h-full w-full object-cover"
-                        />
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 p-[2px] shadow-md">
+                        <div className="h-full w-full rounded-full bg-[#0a0523] overflow-hidden flex items-center justify-center text-white text-xs font-bold">
+                          <img
+                            src={playerAvatars[n] || ""}
+                            alt={`${n} avatar`}
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
                       </div>
+                      <span className="truncate">{n}</span>
                     </div>
-                    <span className="truncate">{n}</span>
+                    <button
+                      onClick={() => onKickPlayer(n)}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-900/40 px-2 py-1 rounded transition-colors ml-2"
+                      title={`Kick ${n}`}
+                    >
+                      ✕
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -238,12 +323,21 @@ export default function HostLobby() {
               {jurors.map((n, i) => (
                 <li
                   key={i}
-                  className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-3 py-2 text-indigo-100 text-sm font-medium flex items-center gap-2 shadow-inner"
+                  className="bg-[#0a0523]/50 border border-indigo-500/20 rounded-xl px-3 py-2 text-indigo-100 text-sm font-medium flex items-center justify-between shadow-inner"
                 >
-                  <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                    {n.charAt(0).toUpperCase()}
+                  <div className="flex items-center gap-2">
+                    <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                      {n.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="truncate">{n}</span>
                   </div>
-                  <span className="truncate">{n}</span>
+                  <button
+                    onClick={() => onKickPlayer(n)}
+                    className="text-red-400 hover:text-red-300 hover:bg-red-900/40 px-2 py-1 rounded transition-colors ml-2"
+                    title={`Kick ${n}`}
+                  >
+                    ✕
+                  </button>
                 </li>
               ))}
             </ul>
@@ -254,7 +348,7 @@ export default function HostLobby() {
           <div className="flex-1 flex flex-col gap-2">
             <button
               onClick={() => navigate("/host/game", { state: { roomCode } })}
-              disabled={jurors.length === 0}
+              disabled={players.length === 0 || jurors.length === 0}
               className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-6 py-4 text-base font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all flex items-center justify-center gap-2"
             >
               Start Game
@@ -271,9 +365,13 @@ export default function HostLobby() {
                 />
               </svg>
             </button>
-            {jurors.length === 0 && (
+            {(players.length === 0 || jurors.length === 0) && (
               <p className="text-center text-xs font-medium text-amber-400/80">
-                At least 1 juror must join before starting
+                {players.length === 0 && jurors.length === 0
+                  ? "At least 1 player and 1 juror must join before starting"
+                  : players.length === 0
+                    ? "At least 1 player must join before starting"
+                    : "At least 1 juror must join before starting"}
               </p>
             )}
           </div>
@@ -304,6 +402,33 @@ export default function HostLobby() {
           </div>
         )}
       </main>
+
+      {/* Kick Confirmation Modal */}
+      <Modal
+        isOpen={showKickModal}
+        onClose={cancelKickPlayer}
+        title="Confirm Kick Player"
+      >
+        <div className="text-center">
+          <p className="text-indigo-200 mb-6">
+            Are you sure you want to kick <span className="font-bold text-white">{playerToKick}</span> from the lobby?
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={confirmKickPlayer}
+              className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-colors"
+            >
+              Yes, Kick Player
+            </button>
+            <button
+              onClick={cancelKickPlayer}
+              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
